@@ -1,0 +1,142 @@
+{
+  "packages": {
+    "local": {
+      "name": "VoxHF Local Slim",
+      "directory": "voxhf-local",
+      "description": "Local agent, local webapp, and configuration for normal Altitude use.",
+      "installDocument": "docs/INSTALL_LOCAL.md",
+      "quickStart": [
+        "Install Node.js 20+ and ffmpeg.",
+        "Extract the ZIP and double-click start.bat."
+      ],
+      "packageJson": {
+        "main": "proxy.js",
+        "scripts": {
+          "setup": "node scripts/setup.js",
+          "start": "node proxy.js",
+          "update:check": "node scripts/update-local.js check",
+          "update:download": "node scripts/update-local.js download",
+          "update:stage": "node scripts/update-local.js stage"
+        },
+        "dependencies": ["ws"]
+      },
+      "paths": [
+        "README.md",
+        "CHANGELOG.md",
+        "SECURITY.md",
+        "LICENSE",
+        "assets",
+        "docs",
+        "config.example.json",
+        "start.bat",
+        "proxy.js",
+        "scripts/setup.js",
+        "scripts/update-local.js",
+        "proxy",
+        "webapp",
+        "packages/protocol"
+      ]
+    },
+    "hosted-webapp": {
+      "name": "VoxHF Hosted Webapp",
+      "directory": "voxhf-hosted-webapp",
+      "description": "Static browser UI for an HTTPS host connected to a VoxHF relay.",
+      "installDocument": "docs/HOSTED_WEBAPP.md",
+      "quickStart": [
+        "Serve the webapp directory from an HTTPS static host.",
+        "Connect it only to a trusted VoxHF relay."
+      ],
+      "paths": [
+        "README.md",
+        "CHANGELOG.md",
+        "SECURITY.md",
+        "LICENSE",
+        "assets",
+        "docs",
+        "webapp",
+        "packages/protocol"
+      ]
+    },
+    "server": {
+      "name": "VoxHF Server",
+      "directory": "voxhf-server",
+      "description": "Relay, hosted webapp, Docker/Caddy, SQLite, and admin tooling.",
+      "installDocument": "docs/SELF_HOSTING.md",
+      "quickStart": [
+        "Run npm run setup -- server to create the private environment file.",
+        "Start the Docker Compose stack after configuring DNS."
+      ],
+      "packageJson": {
+        "main": "apps/relay/index.js",
+        "scripts": {
+          "setup": "node scripts/setup.js server",
+          "relay": "node apps/relay/index.js",
+          "relay:env": "node scripts/run-relay.js",
+          "relay:user": "node scripts/relay-user.js",
+          "relay:db:import-users": "node scripts/import-relay-users.js",
+          "relay:db:user": "node scripts/relay-db-user.js",
+          "relay:backup": "node scripts/relay-backup.js",
+          "directory:server": "node scripts/directory-server.js",
+          "relay:mfa:preflight": "node scripts/check-admin-mfa-live.js"
+        },
+        "dependencies": ["@simplewebauthn/browser", "@simplewebauthn/server", "better-sqlite3", "ws"]
+      },
+      "paths": [
+        "README.md",
+        "CHANGELOG.md",
+        "SECURITY.md",
+        "LICENSE",
+        "assets",
+        "docs",
+        "apps/relay",
+        "infra/docker",
+        "webapp",
+        "packages/protocol",
+        "scripts/env-file.js",
+        "scripts/setup.js",
+        "scripts/run-relay.js",
+        "scripts/relay-user.js",
+        "scripts/import-relay-users.js",
+        "scripts/relay-db-user.js",
+        "scripts/relay-backup.js",
+        "scripts/directory-server.js",
+        "scripts/check-admin-mfa-live.js"
+      ]
+    },
+    "full-source": {
+      "name": "VoxHF Full Source",
+      "directory": "voxhf-full-source",
+      "description": "Complete source for contributors, auditors, and advanced self-hosters.",
+      "installDocument": "docs/DEVELOPMENT.md",
+      "quickStart": [
+        "Run npm ci.",
+        "Run npm run verify before making or publishing changes."
+      ],
+      "paths": [
+        ".github",
+        "apps",
+        "assets",
+        "docs",
+        "infra",
+        "packages",
+        "proxy",
+        "scripts",
+        "webapp",
+        "README.md",
+        "CLAUDE.md",
+        "CHANGELOG.md",
+        "SECURITY.md",
+        "LICENSE",
+        "package.json",
+        "package-lock.json",
+        "release-manifest.json",
+        "config.example.json",
+        "start.bat",
+        "proxy.js",
+        ".dockerignore",
+        ".gitattributes",
+        ".gitignore"
+      ]
+    }
+  }
+}

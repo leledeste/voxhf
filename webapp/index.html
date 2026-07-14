@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="VoxHF is an open-source browser radio, voice and communications companion for IVAO Altitude.">
+  <meta name="theme-color" content="#f7f8f6">
+  <meta property="og:title" content="VoxHF | Flight communications in the browser">
+  <meta property="og:description" content="Tune, listen, transmit and message from a trusted browser while Altitude stays on the simulator PC.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://voxhf.com/">
+  <link rel="canonical" href="https://voxhf.com/">
+  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="landing.css">
+  <script src="site.js" defer></script>
+  <title>VoxHF | Flight communications in the browser</title>
+</head>
+<body class="public-page landing-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="site-brand" href="/" aria-label="VoxHF home"><strong class="wordmark">Vox<span>HF</span></strong></a>
+    <nav class="site-nav" aria-label="Primary navigation">
+      <a href="/" aria-current="page">Home</a>
+      <a href="#how">How it works</a>
+      <a href="setup.html">Setup</a>
+      <a href="servers.html">Servers</a>
+      <a href="https://github.com/leledeste/voxhf" target="_blank" rel="noopener noreferrer">GitHub</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="landing-hero" aria-labelledby="hero-title">
+      <div class="landing-hero-copy">
+        <p class="development-status"><span>In active development</span><strong>Public beta</strong></p>
+        <h1 id="hero-title">Vox<span>HF</span></h1>
+        <p class="hero-lead">Your IVAO communications, wherever you need them.</p>
+        <p class="hero-detail">A local-first browser console for radio, live voice, transponder controls, weather and network messages. Altitude stays on the simulator PC while the controls follow you to another screen.</p>
+        <div class="hero-actions">
+          <a class="button primary-action" href="setup.html">Explore setup</a>
+          <a class="button secondary-action" href="https://github.com/leledeste/voxhf" target="_blank" rel="noopener noreferrer">View source</a>
+        </div>
+      </div>
+      <figure class="hero-preview">
+        <img src="assets/screenshots/hero-workspace.png" alt="VoxHF workspace showing radios, network messages, route weather and transponder controls" width="3200" height="1920" fetchpriority="high">
+      </figure>
+    </section>
+
+    <section class="capabilities" id="features" aria-labelledby="capabilities-title">
+      <div class="capabilities-heading"><p class="eyebrow">Core controls</p><h2 id="capabilities-title">The essentials stay together.</h2></div>
+      <div class="capability-grid">
+        <article><span>01</span><h3>Radio and transponder</h3><p>Tune one active frequency on COM1 or COM2, transmit, and control squawk, STBY/ALT and IDENT.</p></article>
+        <article><span>02</span><h3>One focused workspace</h3><p>Keep messages, nearby stations, route weather and the controls used during a live flight together.</p></article>
+        <article><span>03</span><h3>Local control, remote reach</h3><p>Keep the IVAO connection on your simulator PC and choose whether the browser stays local or uses your relay.</p></article>
+      </div>
+    </section>
+
+    <section class="product-showcase" id="tour" aria-labelledby="showcase-title">
+      <div class="showcase-heading">
+        <div>
+          <p class="eyebrow">Inside VoxHF</p>
+          <h2 id="showcase-title">One workspace. Four focused jobs.</h2>
+          <p>Each view is reserved for one core workflow, so the final screenshots can show the product clearly instead of shrinking the entire interface into every frame.</p>
+        </div>
+      </div>
+
+      <div class="carousel-shell">
+        <button class="carousel-arrow previous" type="button" data-carousel-prev aria-label="Previous screenshot" title="Previous screenshot">&#8592;</button>
+        <div id="feature-carousel" class="feature-carousel" data-carousel tabindex="0" aria-label="VoxHF feature screenshots">
+          <article class="feature-slide">
+            <div class="slide-copy"><span>01 / Radio and XPDR</span><h3>Control the active radio and transponder.</h3><p>Tune COM1 or COM2, choose nearby stations, and manage squawk, STBY/ALT and IDENT from the same panel.</p></div>
+            <figure class="slide-media"><img src="assets/screenshots/feature-radio-xpdr.png" alt="VoxHF radio and transponder controls with a nearby station menu" width="1600" height="960" loading="lazy"></figure>
+          </article>
+          <article class="feature-slide">
+            <div class="slide-copy"><span>02 / Live voice</span><h3>Use the microphone you already have.</h3><p>Listen to RX on multiple trusted devices and transmit from the browser, including with a phone as the cockpit microphone.</p></div>
+            <figure class="slide-media"><img src="assets/screenshots/feature-voice.png" alt="VoxHF browser voice transmission controls during a live frequency exchange" width="3200" height="1920" loading="lazy"></figure>
+          </article>
+          <article class="feature-slide">
+            <div class="slide-copy"><span>03 / Network messages</span><h3>Keep every conversation in its place.</h3><p>Send commands with autocomplete and separate frequency traffic from private controller or pilot conversations.</p></div>
+            <figure class="slide-media"><img src="assets/screenshots/feature-messages.png" alt="VoxHF network messages and command autocomplete" width="3200" height="1920" loading="lazy"></figure>
+          </article>
+          <article class="feature-slide">
+            <div class="slide-copy"><span>04 / Route weather</span><h3>Read weather without decoding it twice.</h3><p>Request route METAR and TAF reports, then expand them into a clearer interpretation when the raw report is not enough.</p></div>
+            <figure class="slide-media"><img src="assets/screenshots/feature-weather.png" alt="VoxHF route METAR and TAF reports with expanded plain-language interpretation" width="3200" height="1920" loading="lazy"></figure>
+          </article>
+        </div>
+        <button class="carousel-arrow next" type="button" data-carousel-next aria-label="Next screenshot" title="Next screenshot">&#8594;</button>
+      </div>
+      <div class="carousel-dots" aria-label="Choose a screenshot">
+        <button type="button" data-carousel-dot="0" aria-label="Show radio and transponder" aria-current="true"></button>
+        <button type="button" data-carousel-dot="1" aria-label="Show live voice" aria-current="false"></button>
+        <button type="button" data-carousel-dot="2" aria-label="Show network messages" aria-current="false"></button>
+        <button type="button" data-carousel-dot="3" aria-label="Show route weather" aria-current="false"></button>
+      </div>
+    </section>
+
+    <section class="how-section" id="how" aria-labelledby="how-title">
+      <div class="section-heading">
+        <p class="eyebrow">How it works</p>
+        <h2 id="how-title">Altitude stays on the simulator. VoxHF meets you in the browser.</h2>
+      </div>
+      <ol class="steps-list">
+        <li><span>01</span><div><strong>Run the local agent</strong><p>It connects to PilotUI, PilotCore, IVAO FSD and the TS2 voice service on the simulator PC.</p></div></li>
+        <li><span>02</span><div><strong>Open a trusted browser</strong><p>Use the local address, connect to an existing server or point the agent at a relay you host.</p></div></li>
+        <li><span>03</span><div><strong>Keep flying normally</strong><p>Altitude remains authoritative while VoxHF mirrors state and sends only allowlisted controls.</p></div></li>
+      </ol>
+    </section>
+
+    <section class="architecture-band" id="architecture">
+      <div><p class="eyebrow">Local by design</p><h2>Your IVAO connection stays on your PC.</h2></div>
+      <div class="architecture-copy">
+        <p>The browser never connects directly to IVAO. The optional relay only carries authenticated state, commands and live audio between the local agent and trusted browsers.</p>
+        <div class="architecture-flow" aria-label="VoxHF connection architecture"><span>Altitude</span><i></i><span>Local agent</span><i></i><span>Private relay</span><i></i><span>Browser</span></div>
+      </div>
+    </section>
+
+    <section class="access-section" id="access">
+      <div class="access-heading">
+        <div class="section-heading"><p class="eyebrow">Choose your setup</p><h2>One cockpit. Three ways to reach it.</h2></div>
+        <p>Start locally with no account, connect through a server you trust, or run the complete stack under your control.</p>
+      </div>
+      <div class="access-rows">
+        <a href="setup.html#local"><span>01</span><div><strong>Use it locally</strong><p>No account and no external server. Open VoxHF directly on the simulator PC.</p></div><b>Local setup <i aria-hidden="true">&rarr;</i></b></a>
+        <a href="setup.html#connect"><span>02</span><div><strong>Connect to a server</strong><p>Reach your local agent from another trusted device or network through an existing server.</p></div><b>Remote setup <i aria-hidden="true">&rarr;</i></b></a>
+        <a href="setup.html#host"><span>03</span><div><strong>Host your own</strong><p>Operate the webapp, relay, account database and administration tools yourself.</p></div><b>Server setup <i aria-hidden="true">&rarr;</i></b></a>
+      </div>
+    </section>
+
+    <section class="development-band">
+      <div><p class="eyebrow">Project status</p><h2>Working software, now available as a public beta.</h2></div>
+      <div class="status-ledger">
+        <div><strong>Working</strong><p>Local and remote COM, XPDR, messaging, weather, browser RX and microphone TX.</p></div>
+        <div><strong>In validation</strong><p>Clean installation, VPS recovery, compatibility checks and broader security review.</p></div>
+        <div><strong>Next</strong><p>Independent review, beta feedback and stabilization toward a release candidate.</p></div>
+      </div>
+    </section>
+
+    <section class="faq-section" id="faq">
+      <div class="section-heading"><p class="eyebrow">Questions</p><h2>The short version.</h2></div>
+      <div class="faq-list">
+        <details><summary>Does VoxHF replace Altitude?</summary><div class="faq-answer"><p>No. Altitude and PilotCore retain the IVAO connection. VoxHF adds a browser control and communications surface around them.</p></div></details>
+        <details><summary>Can I use only the local version?</summary><div class="faq-answer"><p>Yes. Local Slim requires no account, relay or public network access.</p></div></details>
+        <details><summary>Can I connect to somebody else's server?</summary><div class="faq-answer"><p>Yes. The operator provides the app address and account access. Review the operator before trusting an independent server.</p></div></details>
+        <details><summary>Does VoxHF store voice or chat?</summary><div class="faq-answer"><p>Default installations relay live audio and messages without recording voice or maintaining persistent full chat history. Independent operators control their own deployments.</p></div></details>
+        <details><summary>Is VoxHF an official IVAO product?</summary><div class="faq-answer"><p>No. VoxHF is independent, unofficial and not affiliated with or endorsed by IVAO.</p></div></details>
+      </div>
+    </section>
+
+    <section class="final-cta" id="follow">
+      <div><p class="eyebrow">Open development</p><h2>Help shape VoxHF during the public beta.</h2><p>Review the source, follow the roadmap and help validate the current beta builds.</p></div>
+      <div class="hero-actions"><a class="button primary-action" href="https://github.com/leledeste/voxhf" target="_blank" rel="noopener noreferrer">View GitHub</a><a class="button secondary-action" href="https://github.com/leledeste/voxhf/blob/main/docs/ROADMAP.md" target="_blank" rel="noopener noreferrer">Read the roadmap</a></div>
+    </section>
+  </main>
+
+  <footer class="site-footer public-footer">
+    <div class="footer-main">
+      <div class="footer-intro"><a class="site-brand" href="/"><strong class="wordmark">Vox<span>HF</span></strong></a><p>Open-source flight communications for IVAO Altitude, built to stay local first.</p><span>In active development &middot; Public beta</span></div>
+      <div class="footer-links">
+        <div><strong>Explore</strong><a href="/">Home</a><a href="setup.html">Setup</a><a href="servers.html">Servers</a></div>
+        <div><strong>Resources</strong><a href="https://github.com/leledeste/voxhf#readme">Documentation</a><a href="https://github.com/leledeste/voxhf/releases">Releases</a><a href="https://github.com/leledeste/voxhf">Source code</a></div>
+        <div><strong>Project</strong><a href="https://github.com/leledeste/voxhf/blob/main/SECURITY.md">Security</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="https://github.com/leledeste/voxhf/blob/main/LICENSE">AGPL-3.0</a></div>
+      </div>
+    </div>
+    <div class="footer-bottom"><span>Local-first and self-hostable</span><span>Unofficial and not affiliated with or endorsed by IVAO.</span></div>
+  </footer>
+</body>
+</html>

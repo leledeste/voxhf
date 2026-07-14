@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+
+# Local configuration
+config.json
+infra/docker/private/
+*.local.json
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Logs and diagnostics
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.voxhf-relay/
+voice-dumps/
+tx-inspect/
+*.dump
+*.pcm
+*.raw
+*.bin
+
+# Backups and temporary folders
+backup*/
+backups/
+.voxhf-previous-release
+tmp/
+temp/
+
+# Build and release artifacts
+dist/
+build/
+release/
+updates/
+*.zip
+*.7z
+*.tar
+*.tar.gz
+
+# Optional portable tools. Do not commit bundled binaries to the source repo.
+tools/ffmpeg/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

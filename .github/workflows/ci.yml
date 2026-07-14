@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Verify on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          # VS 2022 is supported by the node-gyp version used by better-sqlite3.
+          - windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify project files
+        run: npm run verify
+
+      - name: Run Remote Preview simulation
+        run: npm run remote:test
+
+      - name: Test backup and release artifacts
+        run: |
+          npm run relay:backup:test
+          npm run release:prepare
+          npm run release:verify
+          npm run update:test
+
+      - name: Validate Linux server operations
+        if: runner.os == 'Linux'
+        run: |
+          sh -n infra/docker/voxhf-server.sh
+          cp infra/docker/.env.example infra/docker/.env
+          docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env config --quiet

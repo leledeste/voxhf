@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Choose a VoxHF setup path: local, connect to an existing server, or self-host the complete stack.">
+  <link rel="canonical" href="https://voxhf.com/setup">
+  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="setup.css">
+  <title>Setup | VoxHF</title>
+  <script src="site.js" defer></script>
+</head>
+<body class="public-page setup-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="site-brand" href="/" aria-label="VoxHF home"><strong class="wordmark">Vox<span>HF</span></strong></a>
+    <nav class="site-nav" aria-label="Primary navigation"><a href="/">Home</a><a href="/#how">How it works</a><a href="setup.html" aria-current="page">Setup</a><a href="servers.html">Servers</a><a href="https://github.com/leledeste/voxhf" target="_blank" rel="noopener noreferrer">GitHub</a></nav>
+  </header>
+
+  <main id="main">
+    <section class="page-hero">
+      <div class="page-hero-copy"><p class="eyebrow">Setup guide</p><h1>Choose how VoxHF reaches your cockpit.</h1></div>
+      <p>Run it entirely on the Altitude PC, connect that PC to an existing private server, or operate the complete relay yourself. Start with the path that matches what you actually need.</p>
+    </section>
+
+    <nav class="route-index" aria-label="Setup paths">
+      <a href="#local"><span>01</span><strong>Use VoxHF locally</strong><b>No account</b></a>
+      <a href="#connect"><span>02</span><strong>Connect to an existing server</strong><b>Account + invite</b></a>
+      <a href="#host"><span>03</span><strong>Host your own server</strong><b>Docker + domain</b></a>
+    </nav>
+
+    <section class="setup-route" id="local">
+      <div class="setup-route-head">
+        <div><p class="eyebrow">Path 01</p><h2>Local Slim</h2></div>
+        <div>Everything operational stays on the Windows PC running Altitude. This is the smallest installation and the correct starting point for most pilots.</div>
+      </div>
+      <div class="steps">
+        <article class="step"><h3>Install the requirements</h3><div class="step-content"><p>VoxHF requires Node.js 20 or newer and ffmpeg with Speex support.</p><pre><code>winget install OpenJS.NodeJS.LTS
+winget install Gyan.FFmpeg</code></pre><p>Open a new terminal after installation.</p></div></article>
+        <article class="step"><h3>Get Local Slim</h3><div class="step-content"><p>Download <code>voxhf-local-&lt;version&gt;.zip</code> and <code>SHA256SUMS.txt</code> from the matching GitHub release. Extract the complete archive to a normal user folder.</p><p><a class="text-link" href="https://github.com/leledeste/voxhf/releases" target="_blank" rel="noopener noreferrer">Open releases <span aria-hidden="true">&gt;</span></a></p></div></article>
+        <article class="step"><h3>Start the agent</h3><div class="step-content"><p>Double-click <code>start.bat</code>. On first launch the setup wizard creates private <code>config.json</code> and detects a suitable Ethernet or Wi-Fi IPv4 address.</p></div></article>
+        <article class="step"><h3>Connect PilotUI</h3><div class="step-content"><p>Double-click <code>start.bat</code> before opening PilotUI. Enter the IPv4 address printed in the VoxHF console as the PilotUI Simulator Address, then connect Altitude normally.</p></div></article>
+        <article class="step"><h3>Open the workspace</h3><div class="step-content"><pre><code>http://localhost:3000</code></pre><p>The local browser workspace needs no account and is not exposed to the public internet.</p></div></article>
+      </div>
+    </section>
+
+    <section class="setup-route" id="connect">
+      <div class="setup-route-head">
+        <div><p class="eyebrow">Path 02</p><h2>Existing server</h2></div>
+        <div>Your local agent still owns the Altitude and IVAO-facing connections. The external server supplies account access and relays allowlisted state, commands and live audio to trusted browsers.</div>
+      </div>
+      <div class="steps">
+        <article class="step"><h3>Choose an operator</h3><div class="step-content"><p>Ask the server operator for the hosted app URL, relay URL and a one-time registration code when registration is invite-only. Independent servers may run modified software; review the operator's information before registering.</p><p><a class="text-link" href="servers.html">Browse listed servers <span aria-hidden="true">&gt;</span></a></p></div></article>
+        <article class="step"><h3>Create your account</h3><div class="step-content"><p>Open the server app's <code>/register</code> page. Enter your own username, password and invitation code. Save the personal agent token shown once after registration.</p></div></article>
+        <article class="step"><h3>Configure Local Slim</h3><div class="step-content"><p>From the extracted Local folder, use the guided setup:</p><pre><code>npm.cmd run setup -- agent</code></pre><p>Enter the server's relay URL, your personal agent token and a recognizable simulator-PC name.</p><p>Alternatively, open the existing <code>config.json</code> and update only these fields:</p><pre><code>{
+  "remoteAgentEnabled": true,
+  "remoteRelayUrl": "wss://relay.example.com",
+  "remoteRelayToken": "paste-your-personal-agent-token",
+  "remoteDeviceId": "my-simulator-pc",
+  "remoteDeviceName": "My Simulator PC"
+}</code></pre><p>Use the relay URL supplied by the operator. Keep <code>remoteDeviceId</code> stable for this PC; <code>remoteDeviceName</code> is the friendly name shown in the app. Preserve every other setting already present in <code>config.json</code>.</p></div></article>
+        <article class="step"><h3>Restart and verify</h3><div class="step-content"><p>Restart <code>start.bat</code>. The console should report the remote agent as connected. Sign in to the hosted app from each trusted PC or phone using the same account.</p></div></article>
+        <article class="step"><h3>Keep local fallback</h3><div class="step-content"><p><code>http://localhost:3000</code> remains available even when the external relay is unavailable. No PilotUI, PilotCore, FSD or TS2 proxy port is opened to the internet.</p></div></article>
+      </div>
+    </section>
+
+    <section class="setup-route" id="host">
+      <div class="setup-route-head">
+        <div><p class="eyebrow">Path 03</p><h2>Self-hosted server</h2></div>
+        <div>Use this route when you want control over accounts, storage, updates and availability. One Linux VPS runs the landing page, hosted app and relay behind automatic HTTPS.</div>
+      </div>
+      <div class="steps">
+        <article class="step"><h3>Prepare the VPS and DNS</h3><div class="step-content"><p>Use a current Ubuntu or Debian VPS with a public IP address. Create three DNS records pointing to that address and wait until all three resolve:</p><pre><code>your-domain.example
+app.your-domain.example
+relay.your-domain.example</code></pre><p>The first serves the public site, the second the operational app, and the third the relay and admin panel.</p></div></article>
+        <article class="step"><h3>Install Docker and host tools</h3><div class="step-content"><pre><code>apt update
+apt install -y docker.io docker-compose-v2 git curl ufw
+systemctl enable --now docker
+docker --version
+docker compose version</code></pre><p>If your distribution does not provide <code>docker-compose-v2</code>, install Docker Engine and the Compose plugin from Docker's official repository. Do not continue until <code>docker compose version</code> succeeds.</p></div></article>
+        <article class="step"><h3>Open only the required ports</h3><div class="step-content"><p>Allow your real SSH port before enabling the firewall, then expose HTTP and HTTPS:</p><pre><code>ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable
+ufw status</code></pre><p>VoxHF does not require any other public port. Keep the local PilotUI, PilotCore, FSD, TS2 and webapp ports private.</p></div></article>
+        <article class="step"><h3>Clone VoxHF Server</h3><div class="step-content"><p>A Git checkout is recommended because the managed update and rollback commands use its history.</p><pre><code>git clone https://github.com/leledeste/voxhf.git /opt/voxhf
+cd /opt/voxhf
+chmod +x infra/docker/voxhf-server.sh</code></pre></div></article>
+        <article class="step"><h3>Create private configuration</h3><div class="step-content"><pre><code>infra/docker/voxhf-server.sh setup</code></pre><p>Enter the base domain without <code>https://</code>, an email address for TLS notices, and choose either <strong>Private token</strong> for one owner or <strong>Accounts</strong> for invite-only multi-user access. Store every generated token in a password manager. The wizard creates the Git-ignored <code>infra/docker/.env</code>; never commit or share it.</p></div></article>
+        <article class="step"><h3>Validate and start</h3><div class="step-content"><pre><code>infra/docker/voxhf-server.sh doctor
+infra/docker/voxhf-server.sh start
+curl https://relay.your-domain.example/health</code></pre><p>Startup builds both containers, obtains TLS certificates and waits for relay health. DNS must already point to the VPS and inbound TCP 80/443 must be reachable.</p></div></article>
+        <article class="step"><h3>Complete access setup</h3><div class="step-content"><p><strong>Accounts:</strong> customise the neutral Terms and Privacy templates before inviting other people. Then open <code>https://relay.your-domain.example/admin</code>, use the bootstrap token to create the owner, create a one-time invite under Access, and register at <code>https://app.your-domain.example/register</code>. Save the personal agent token shown after registration.</p><p><strong>Private token:</strong> use the relay token printed by the wizard for the local agent and browser Remote settings. The browser must also be paired with the short-lived code printed by the agent.</p><p>MFA for the owner account is optional and can be enabled later from the admin Security section.</p></div></article>
+        <article class="step"><h3>Connect the Altitude PC</h3><div class="step-content"><p>Install Local Slim on the Windows PC, then configure its outbound connection:</p><pre><code>npm.cmd run setup -- agent</code></pre><p>Enter <code>wss://relay.your-domain.example</code>, the personal agent token and a recognizable PC name. Restart <code>start.bat</code>; the console must report the remote agent as connected. The local workspace remains available at <code>http://localhost:3000</code>.</p></div></article>
+        <article class="step"><h3>Verify the complete path</h3><div class="step-content"><p>Open the base domain, sign in at the app domain, confirm the agent is online, and test COM, XPDR, chat, RX and TX from a trusted browser before relying on the deployment during a flight.</p><pre><code>infra/docker/voxhf-server.sh doctor
+infra/docker/voxhf-server.sh logs</code></pre></div></article>
+        <article class="step"><h3>Back up before updating</h3><div class="step-content"><pre><code>infra/docker/voxhf-server.sh backup
+infra/docker/voxhf-server.sh update</code></pre><p>Keep off-server copies of <code>infra/docker/.env</code> and the SQLite backups in <code>infra/docker/backups/</code>. Test <code>restore &lt;backup-file&gt;</code> before depending on those backups. After a managed update, <code>rollback</code> restores the previous commit and its pre-update database.</p></div></article>
+      </div>
+      <p><a class="text-link" href="https://github.com/leledeste/voxhf/blob/main/docs/SELF_HOSTING.md" target="_blank" rel="noopener noreferrer">Read the complete self-hosting reference <span aria-hidden="true">&gt;</span></a></p>
+    </section>
+  </main>
+
+  <footer class="site-footer public-footer">
+    <div class="footer-main">
+      <div class="footer-intro"><a class="site-brand" href="/"><strong class="wordmark">Vox<span>HF</span></strong></a><p>Open-source flight communications for IVAO Altitude, built to stay local first.</p><span>In active development &middot; Public beta</span></div>
+      <div class="footer-links">
+        <div><strong>Explore</strong><a href="/">Home</a><a href="setup.html">Setup</a><a href="servers.html">Servers</a></div>
+        <div><strong>Resources</strong><a href="https://github.com/leledeste/voxhf#readme">Documentation</a><a href="https://github.com/leledeste/voxhf/releases">Releases</a><a href="https://github.com/leledeste/voxhf">Source code</a></div>
+        <div><strong>Project</strong><a href="https://github.com/leledeste/voxhf/blob/main/SECURITY.md">Security</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="https://github.com/leledeste/voxhf/blob/main/LICENSE">AGPL-3.0</a></div>
+      </div>
+    </div>
+    <div class="footer-bottom"><span>Local-first and self-hostable</span><span>Unofficial and not affiliated with or endorsed by IVAO.</span></div>
+  </footer>
+</body>
+</html>

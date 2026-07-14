@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Privacy template and technical data-handling defaults for a VoxHF server.">
+  <meta name="theme-color" content="#f5f7f6">
+  <title>Privacy | VoxHF</title>
+  <link rel="stylesheet" href="site.css">
+</head>
+<body class="public-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="site-brand" href="/" aria-label="VoxHF home"><strong class="wordmark">Vox<span>HF</span></strong></a>
+    <nav class="site-nav" aria-label="Primary navigation"><a href="/">Home</a><a href="setup.html">Setup</a><a href="servers.html">Servers</a><a href="https://github.com/leledeste/voxhf" target="_blank" rel="noopener noreferrer">GitHub</a></nav>
+  </header>
+
+  <main class="legal-page" id="main">
+    <header>
+      <p class="eyebrow">Self-host template</p>
+      <h1>Privacy</h1>
+      <p>This page describes the privacy-oriented defaults in VoxHF. It is not a privacy policy for every server: each server is operated independently and its operator is responsible for publishing accurate information.</p>
+    </header>
+
+    <section>
+      <h2>Operator action required</h2>
+      <p>Before enabling account registration for other people, the server operator should replace this template with a notice identifying the operator, contact method, infrastructure providers, purposes, legal bases, retention periods and user rights that apply to that deployment.</p>
+    </section>
+
+    <section>
+      <h2>Account data</h2>
+      <p>A standard VoxHF relay stores the chosen username and display name, password hashes, hashed authentication and session identifiers, device and pairing records, and passkey public-key data when passkeys are enabled.</p>
+    </section>
+
+    <section>
+      <h2>Live session data</h2>
+      <p>During an active connection the relay routes radio and transponder state, callsigns, weather, messages, microphone audio and received voice between the local agent and authorised browsers. This data can include communications from other network participants.</p>
+    </section>
+
+    <section>
+      <h2>Default non-persistence</h2>
+      <p>VoxHF does not intentionally persist voice recordings, permanent chat history, raw FSD traffic, raw TS2 traffic or full authentication tokens. Audit persistence and application-level IP and user-agent storage are disabled by default.</p>
+    </section>
+
+    <section>
+      <h2>Browser storage</h2>
+      <p>The webapp uses necessary authentication cookies and local browser storage for device identity, pairing, theme, audio and connection preferences. Manual-token mode can store a relay token supplied by the user in that browser.</p>
+    </section>
+
+    <section>
+      <h2>Default retention</h2>
+      <p>Account and device records remain until deletion or revocation. Invitation codes normally expire within 24 hours and pairing codes within 10 minutes. Optional audit events default to 7 days when enabled. Recognised SQLite backups and pre-restore copies default to 30 days.</p>
+    </section>
+
+    <section>
+      <h2>Independent servers</h2>
+      <p>The VoxHF project cannot inspect or guarantee the configuration, security, availability or data practices of an independent server. Review the operator and server-specific notice before creating an account.</p>
+    </section>
+
+    <section>
+      <h2>Project documentation</h2>
+      <p>Technical privacy controls and self-hosting responsibilities are documented in the public source repository. Deployment-specific questions must be directed to the operator of the server you use.</p>
+    </section>
+
+    <footer class="privacy-updated">Template distributed with the open-source VoxHF server.</footer>
+  </main>
+
+  <footer class="site-footer public-footer">
+    <div class="footer-main">
+      <div class="footer-intro"><a class="site-brand" href="/"><strong class="wordmark">Vox<span>HF</span></strong></a><p>Open-source flight communications for IVAO Altitude, built to stay local first.</p><span>In active development &middot; Public beta</span></div>
+      <div class="footer-links">
+        <div><strong>Explore</strong><a href="/">Home</a><a href="setup.html">Setup</a><a href="servers.html">Servers</a></div>
+        <div><strong>Resources</strong><a href="https://github.com/leledeste/voxhf#readme">Documentation</a><a href="https://github.com/leledeste/voxhf/releases">Releases</a><a href="https://github.com/leledeste/voxhf">Source code</a></div>
+        <div><strong>Project</strong><a href="https://github.com/leledeste/voxhf/blob/main/SECURITY.md">Security</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="https://github.com/leledeste/voxhf/blob/main/LICENSE">AGPL-3.0</a></div>
+      </div>
+    </div>
+    <div class="footer-bottom"><span>Local-first and self-hostable</span><span>Unofficial and not affiliated with or endorsed by IVAO.</span></div>
+  </footer>
+</body>
+</html>

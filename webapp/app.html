@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workspace | VoxHF</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Persistent status/header. It reflects the proxy/FSD state while the
+         heartbeat handles control-channel recovery in the background. -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-copy">
+          <div class="title">Vox<span>HF</span></div>
+          <div class="brand-subtitle">Flight communications</div>
+        </div>
+      </div>
+      <div class="status" aria-label="Connection status">
+        <span class="telemetry-cell connection-cell">
+          <span id="dot" class="nav-beacon" aria-hidden="true"></span>
+          <span class="telemetry-copy"><small>Link</small><strong id="status-text">Offline</strong></span>
+        </span>
+        <span id="remote-pill" class="telemetry-cell hidden"><span class="telemetry-copy"><small>Mode</small><strong id="remote-mode">Local</strong></span></span>
+        <span class="telemetry-cell flight-plan-cell">
+          <span id="flight-plan-dot" class="state-rail" aria-hidden="true"></span>
+          <span class="telemetry-copy"><small>FPL</small><strong id="flight-plan-text">No flight plan</strong></span>
+        </span>
+        <span class="telemetry-cell callsign-pill"><span class="telemetry-copy"><small>Callsign</small><strong id="callsign">---</strong></span></span>
+      </div>
+      <div class="header-actions">
+        <span id="rx-light" class="rx-light"><small>Audio</small><strong>RX</strong></span>
+        <button id="theme-toggle" class="header-button" type="button" aria-label="Switch color theme"><span id="theme-label">Dark</span></button>
+        <button id="settings-open" class="header-button settings-button" type="button">Settings</button>
+      </div>
+    </header>
+
+    <div id="update-notice" class="update-notice hidden" role="status" aria-live="polite">
+      <div>
+        <strong id="update-title">Update available</strong>
+        <span id="update-text">A newer VoxHF version is available.</span>
+      </div>
+      <a id="update-link" href="https://github.com/leledeste/voxhf/releases/latest" target="_blank" rel="noopener noreferrer">Download</a>
+      <button id="update-dismiss" type="button">Later</button>
+    </div>
+
+    <main class="workspace">
+      <aside class="control-rail" aria-label="Aircraft controls">
+        <section class="surface radio-surface">
+          <div class="surface-heading">
+            <div><span class="eyebrow">Voice</span><h1>Radios</h1></div>
+          </div>
+          <div class="radio-stack">
+            <article class="radio">
+              <div class="radio-header">
+                <div class="radio-identity"><span class="radio-name">COM1</span><span class="radio-freq" id="com1-label">---</span></div>
+                <button id="tx1" class="tx-button" type="button">TX COM1</button>
+              </div>
+              <label class="control-field frequency-field">
+                <span>Frequency</span>
+                <input id="com1-input" inputmode="numeric" maxlength="7" placeholder="---" aria-label="COM1 frequency">
+              </label>
+              <label class="control-field station-field">
+                <span>Station</span>
+                <select id="com1-select" class="station-select" aria-label="COM1 station">
+                  <option value="" disabled hidden>Stations by frequency</option>
+                </select>
+              </label>
+            </article>
+            <article class="radio">
+              <div class="radio-header">
+                <div class="radio-identity"><span class="radio-name">COM2</span><span class="radio-freq" id="com2-label">---</span></div>
+                <button id="tx2" class="tx-button" type="button">TX COM2</button>
+              </div>
+              <label class="control-field frequency-field">
+                <span>Frequency</span>
+                <input id="com2-input" inputmode="numeric" maxlength="7" placeholder="---" aria-label="COM2 frequency">
+              </label>
+              <label class="control-field station-field">
+                <span>Station</span>
+                <select id="com2-select" class="station-select" aria-label="COM2 station">
+                  <option value="" disabled hidden>Stations by frequency</option>
+                </select>
+              </label>
+            </article>
+          </div>
+          <div id="webtx-status" class="voice-status warning radio-webtx-status">Web TX waiting for Altitude PTT.</div>
+        </section>
+
+        <section class="surface xpdr-surface">
+          <div class="surface-heading">
+            <div><span class="eyebrow">Aircraft</span><h2>Transponder</h2></div>
+          </div>
+          <div class="xpdr-panel">
+            <label class="xpdr-code-field">
+              <span>Squawk</span>
+              <input id="xpdr-code" class="xpdr-code" inputmode="numeric" maxlength="4" value="7000" aria-label="Squawk code">
+            </label>
+            <div class="xpdr-mode" aria-label="Transponder mode">
+              <button id="xpdr-stby" class="stby active" type="button">STBY</button>
+              <button id="xpdr-alt" type="button">ALT</button>
+            </div>
+            <button id="xpdr-ident" class="xpdr-ident" type="button">ID</button>
+          </div>
+        </section>
+      </aside>
+
+      <section id="communications" class="work surface" aria-label="Communications">
+        <div class="toolbar">
+          <div class="workspace-title"><span class="eyebrow">Network</span><h1>Communications</h1></div>
+          <div class="tabs" role="tablist" aria-label="Message filters">
+            <button id="tab-all" class="tab active" data-filter="all" type="button">All</button>
+            <button id="tab-frequency" class="tab" data-filter="frequency" type="button">Frequency</button>
+            <button id="tab-private" class="tab" data-filter="private" type="button">Private</button>
+            <button id="tab-system" class="tab" data-filter="system" type="button">System</button>
+          </div>
+        </div>
+        <div id="messages" class="messages"></div>
+        <footer class="composer">
+          <select id="recipient" aria-label="Message recipient">
+            <option id="recipient-frequency" value="@22800">UNICOM / frequency</option>
+            <option value="*">Broadcast</option>
+            <option id="recipient-custom" value="custom">Custom...</option>
+          </select>
+          <div class="composer-field">
+            <input id="message-input" autocomplete="off" placeholder="Message or command: .metar LIMC, .taf LIRF, .chat CALLSIGN">
+            <div id="command-menu" class="command-menu hidden" role="listbox" aria-label="Command suggestions"></div>
+          </div>
+          <button id="send" class="send" type="button">Send</button>
+        </footer>
+      </section>
+
+      <aside id="route-weather" class="info-rail surface" aria-label="Route information">
+        <div class="surface-heading">
+          <div><span class="eyebrow">Flight plan</span><h2>Route weather</h2></div>
+        </div>
+        <div id="weather-panel" class="weather-panel"></div>
+      </aside>
+    </main>
+  </div>
+  <!-- Connection overlay. It is shown when the proxy or Altitude/FSD side is
+       not ready, but the page keeps trying to recover in the background. -->
+  <div id="overlay" class="overlay">
+    <div class="dialog">
+      <h1 id="overlay-title">Proxy unavailable</h1>
+      <p id="overlay-text">Start <code>start.bat</code> or <code>node proxy.js</code>.</p>
+      <div id="overlay-actions" class="dialog-actions hidden">
+        <button id="overlay-remote-settings" type="button">Open Remote Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="auth-overlay" class="auth-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+    <div class="auth-panel">
+      <div>
+        <h1 id="auth-title">VoxHF Remote</h1>
+        <p>Sign in to your hosted relay account or create a new one.</p>
+      </div>
+      <div class="auth-form">
+        <label>
+          Relay URL
+          <input id="auth-remote-url" autocomplete="off" placeholder="wss://relay.voxhf.com">
+        </label>
+        <label>
+          Username
+          <input id="auth-account-user" autocomplete="username" placeholder="username">
+        </label>
+        <label>
+          Display Name <span class="label-note">Register only</span>
+          <input id="auth-account-name" autocomplete="name" placeholder="Display name">
+        </label>
+        <label>
+          Password
+          <input id="auth-account-password" type="password" autocomplete="current-password" placeholder="Password">
+        </label>
+        <label>
+          Invitation Code <span class="label-note">Register only</span>
+          <input id="auth-account-invite" autocomplete="one-time-code" spellcheck="false" placeholder="VHF-...">
+        </label>
+      </div>
+      <div id="auth-status" class="auth-status">Log in on each browser. Register once, then copy the agent token to the Altitude PC.</div>
+      <div id="auth-agent-token" class="agent-token-box hidden"></div>
+      <div class="auth-actions">
+        <button id="auth-login" type="button">Login</button>
+        <button id="auth-register" type="button">Register</button>
+        <button id="auth-continue" class="wide hidden" type="button">Continue</button>
+        <button id="auth-manual" class="wide" type="button">Manual Relay Setup</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="settings-panel">
+      <div class="settings-head">
+        <h1 id="settings-title" class="settings-title">Settings</h1>
+        <button id="settings-close" type="button">Close</button>
+      </div>
+      <div class="settings-tabs">
+        <button class="settings-tab active" type="button" data-settings-tab="audio">Audio</button>
+        <button class="settings-tab" type="button" data-settings-tab="connection">Connection</button>
+        <button class="settings-tab" type="button" data-settings-tab="remote">Remote</button>
+        <button class="settings-tab" type="button" data-settings-tab="about">About</button>
+      </div>
+      <div class="settings-body">
+        <section class="settings-page" data-settings-page="audio">
+          <div class="settings-grid">
+            <div class="setting-row">
+              <span class="setting-label">Microphone</span>
+              <span id="settings-mic" class="setting-value">Not requested</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Audio Output</span>
+              <span id="settings-output" class="setting-value">Idle</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Web TX</span>
+              <span id="settings-webtx" class="setting-value">Waiting</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">TX Sample Rate</span>
+              <span id="settings-sample-rate" class="setting-value">---</span>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button id="settings-test-audio" type="button">Test RX</button>
+            <button id="settings-monitor-tx" class="tx-button" type="button">Monitor TX</button>
+          </div>
+        </section>
+
+        <section class="settings-page hidden" data-settings-page="connection">
+          <div class="settings-grid">
+            <div class="setting-row">
+              <span class="setting-label">Proxy</span>
+              <span id="settings-proxy" class="setting-value">Offline</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Altitude / FSD</span>
+              <span id="settings-altitude" class="setting-value">Offline</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Simulator Address</span>
+              <span id="settings-address" class="setting-value">---</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Callsign</span>
+              <span id="settings-callsign" class="setting-value">---</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Flight Plan</span>
+              <span id="settings-flight-plan" class="setting-value">No flight plan</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Voice Server</span>
+              <span id="settings-voice-server" class="setting-value">---</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Heartbeat</span>
+              <span id="settings-heartbeat" class="setting-value">---</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-page hidden" data-settings-page="remote">
+          <div class="settings-grid">
+            <div class="setting-row">
+              <span class="setting-label">Mode</span>
+              <span id="settings-remote-mode" class="setting-value">Local</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Relay</span>
+              <span id="settings-remote-relay" class="setting-value">---</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Remote User</span>
+              <span id="settings-remote-user" class="setting-value">---</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Account</span>
+              <span id="settings-account-state" class="setting-value">Not logged in</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Remote Status</span>
+              <span id="settings-remote-summary" class="setting-value">Local mode</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Relay Check</span>
+              <span id="settings-remote-check" class="setting-value">Not checked</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Browser Pairing</span>
+              <span id="settings-remote-pairing-state" class="setting-value">Not paired</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Agent Pairing Code</span>
+              <span id="settings-remote-agent-code" class="setting-value">---</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Paired Agent</span>
+              <span id="settings-remote-device" class="setting-value">---</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Online Agents</span>
+              <span id="settings-remote-devices" class="setting-value">0</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Agent</span>
+              <span id="settings-remote-agent" class="setting-value">Offline</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Last Remote Update</span>
+              <span id="settings-remote-last-update" class="setting-value">Waiting</span>
+            </div>
+          </div>
+          <div class="settings-form">
+            <label>
+              Relay URL
+              <input id="settings-remote-url" autocomplete="off" placeholder="wss://relay.voxhf.com">
+            </label>
+            <label>
+              Relay Token
+              <input id="settings-remote-token" type="password" autocomplete="off" placeholder="Token">
+            </label>
+            <label>
+              Pairing Code
+              <input id="settings-remote-pairing" autocomplete="off" placeholder="ABC-123">
+            </label>
+          </div>
+          <div class="settings-actions">
+            <button id="settings-account-open" type="button">Login / Register</button>
+            <button id="settings-account-logout" type="button">Logout</button>
+            <button id="settings-account-rotate-token" type="button">Rotate Agent Token</button>
+          </div>
+          <div id="settings-account-token" class="agent-token-box hidden"></div>
+          <section id="settings-account-security" class="settings-subsection hidden">
+            <div class="settings-subsection-head">
+              <div><span class="setting-label">Account security</span><strong>Browser sessions</strong></div>
+              <button id="settings-account-refresh-sessions" type="button" title="Refresh sessions" aria-label="Refresh sessions">&#8635;</button>
+            </div>
+            <div id="settings-account-sessions" class="account-session-list"></div>
+            <div class="settings-actions">
+              <button id="settings-account-revoke-others" type="button">Logout Other Devices</button>
+            </div>
+            <form id="settings-account-password-form" class="settings-form account-password-form">
+              <label>Current password<input id="settings-account-current-password" type="password" autocomplete="current-password"></label>
+              <label>New password<input id="settings-account-new-password" type="password" autocomplete="new-password" minlength="10"></label>
+              <label>Confirm password<input id="settings-account-confirm-password" type="password" autocomplete="new-password" minlength="10"></label>
+              <button type="submit">Change Password</button>
+            </form>
+            <div id="settings-account-security-status" class="auth-status"></div>
+          </section>
+          <div class="settings-actions">
+            <button id="settings-remote-apply" type="button">Apply Remote</button>
+            <button id="settings-remote-check-button" type="button">Check Remote</button>
+            <button id="settings-remote-renew-code" type="button">Renew Pairing Code</button>
+            <button id="settings-remote-copy-code" type="button">Copy Pairing Code</button>
+            <button id="settings-remote-pair" type="button">Pair Browser</button>
+            <button id="settings-remote-forget" type="button">Forget Pairing</button>
+            <button id="settings-remote-local" type="button">Use Local</button>
+          </div>
+        </section>
+
+        <section class="settings-page hidden" data-settings-page="about">
+          <div class="settings-grid">
+            <div class="setting-row">
+              <span class="setting-label">Version</span>
+              <span id="settings-version" class="setting-value">---</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Mode</span>
+              <span class="setting-value">Local unofficial IVAO companion</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Documentation</span>
+              <span class="setting-value">README.md, ROADMAP.md, DEVELOPMENT.md, CHANGELOG.md</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">License</span>
+              <span class="setting-value"><a href="https://github.com/leledeste/voxhf/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GNU AGPL v3.0 only</a></span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Source</span>
+              <span class="setting-value"><a href="https://github.com/leledeste/voxhf" target="_blank" rel="noopener noreferrer">github.com/leledeste/voxhf</a></span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Privacy</span>
+              <span class="setting-value">The webapp talks to the local proxy and does not store IVAO credentials.</span>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script src="weather.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

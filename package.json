@@ -1,0 +1,62 @@
+{
+  "name": "voxhf",
+  "version": "0.1.0-beta.1",
+  "description": "Local IVAO Altitude bridge with browser radio, chat and voice controls.",
+  "main": "proxy.js",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "start": "node proxy.js",
+    "relay": "node apps/relay/index.js",
+    "relay:env": "node scripts/run-relay.js",
+    "relay:user": "node scripts/relay-user.js",
+    "relay:db:import-users": "node scripts/import-relay-users.js",
+    "relay:db:user": "node scripts/relay-db-user.js",
+    "relay:backup": "node scripts/relay-backup.js",
+    "relay:backup:test": "node scripts/test-relay-backup.js",
+    "db:test": "node scripts/test-relay-db.js",
+    "db:auth:test": "node scripts/test-relay-db-auth.js",
+    "db:user:test": "node scripts/test-relay-db-user.js",
+    "relay:admin:test": "node scripts/test-relay-admin.js",
+    "relay:mfa:preflight": "node scripts/check-admin-mfa-live.js",
+    "relay:account:test": "node scripts/test-relay-account.js",
+    "directory:server": "node scripts/directory-server.js",
+    "directory:test": "node scripts/test-directory.js",
+    "directory:api:test": "node scripts/test-directory-api.js",
+    "site:preview": "node scripts/preview-site.js",
+    "setup:test": "node scripts/test-setup.js",
+    "release:prepare": "node scripts/prepare-release.js",
+    "release:verify": "node scripts/verify-release.js",
+    "release:test": "node scripts/verify-release.js --install",
+    "release:version": "node scripts/set-release-version.js",
+    "release:version:check": "node scripts/check-release-version.js",
+    "update:check": "node scripts/update-local.js check",
+    "update:download": "node scripts/update-local.js download",
+    "update:stage": "node scripts/update-local.js stage",
+    "update:test": "node scripts/test-local-update.js",
+    "remote:check": "node scripts/check-remote-preview.js",
+    "remote:test": "node scripts/test-remote-preview.js",
+    "verify": "node scripts/check.js",
+    "check": "npm run verify"
+  },
+  "keywords": [
+    "ivao",
+    "altitude",
+    "radio",
+    "voice",
+    "websocket"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "^13.2.0",
+    "@simplewebauthn/server": "^13.3.1",
+    "better-sqlite3": "^12.11.1",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.1"
+  }
+}

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Browse opt-in VoxHF servers and see recent heartbeat availability, access policy and operator information.">
+  <link rel="canonical" href="https://voxhf.com/servers">
+  <link rel="stylesheet" href="site.css">
+  <title>Server Directory | VoxHF</title>
+  <script src="servers.js" defer></script>
+</head>
+<body class="public-page servers-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="site-brand" href="/" aria-label="VoxHF home"><strong class="wordmark">Vox<span>HF</span></strong></a>
+    <nav class="site-nav" aria-label="Primary navigation"><a href="/">Home</a><a href="/#how">How it works</a><a href="setup.html">Setup</a><a href="servers.html" aria-current="page">Servers</a><a href="https://github.com/leledeste/voxhf" target="_blank" rel="noopener noreferrer">GitHub</a></nav>
+  </header>
+
+  <main id="main">
+    <section class="page-hero">
+      <p class="eyebrow">Public directory</p>
+      <h1>Find a server that matches how you want to fly.</h1>
+      <p>Servers appear only after their operator opts in. Availability reflects a recent authenticated heartbeat, while access and operator details remain self-declared.</p>
+    </section>
+
+    <section class="directory-shell">
+      <div class="directory-tools">
+        <label>Search<input id="server-search" type="search" placeholder="Server, operator or region" autocomplete="off"></label>
+        <label>Access<select id="server-access"><option value="">All access modes</option><option value="open">Open</option><option value="invite">Invite only</option><option value="closed">Closed</option></select></label>
+        <label>Status<select id="server-status"><option value="">Any status</option><option value="online">Online</option><option value="maintenance">Maintenance</option><option value="offline">Offline</option></select></label>
+      </div>
+      <div id="server-list" class="server-list" aria-live="polite"><div class="directory-empty">Loading the directory...</div></div>
+      <p id="directory-updated" class="server-meta"></p>
+    </section>
+
+    <section class="directory-disclaimer" aria-label="Independent server notice">
+      <strong>Independent servers are not verified or controlled by VoxHF.</strong>
+      <p>A listed operator may modify the server software, configuration or data practices. VoxHF cannot inspect or guarantee a server's security, availability, privacy practices or use of account and relayed data. Review the operator, source and privacy information before registering. "Online" means only that the directory received a recent heartbeat; it is not a trust certification or endorsement.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer public-footer">
+    <div class="footer-main">
+      <div class="footer-intro"><a class="site-brand" href="/"><strong class="wordmark">Vox<span>HF</span></strong></a><p>Open-source flight communications for IVAO Altitude, built to stay local first.</p><span>In active development &middot; Public beta</span></div>
+      <div class="footer-links">
+        <div><strong>Explore</strong><a href="/">Home</a><a href="setup.html">Setup</a><a href="servers.html">Servers</a></div>
+        <div><strong>Resources</strong><a href="https://github.com/leledeste/voxhf#readme">Documentation</a><a href="https://github.com/leledeste/voxhf/releases">Releases</a><a href="https://github.com/leledeste/voxhf">Source code</a></div>
+        <div><strong>Project</strong><a href="https://github.com/leledeste/voxhf/blob/main/SECURITY.md">Security</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="https://github.com/leledeste/voxhf/blob/main/LICENSE">AGPL-3.0</a></div>
+      </div>
+    </div>
+    <div class="footer-bottom"><span>Local-first and self-hostable</span><span>Unofficial and not affiliated with or endorsed by IVAO.</span></div>
+  </footer>
+</body>
+</html>

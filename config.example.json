@@ -1,0 +1,23 @@
+{
+  "lanIp": "",
+  "voiceDecode": true,
+  "voiceDiagnostics": false,
+  "voiceSampleRate": 32000,
+  "voiceStripBytes": 1,
+  "voiceFramesPerPacket": 12,
+  "webTxEnabled": true,
+  "webTxSampleRate": 8000,
+  "webTxQuality": 10,
+  "webTxAbr": false,
+  "webTxBitrate": 0,
+  "webTxFramesPerPacket": 5,
+  "webTxPacketIntervalMs": 92,
+  "webTxPacketMode": "fixed",
+  "remoteAgentEnabled": false,
+  "remoteRelayUrl": "",
+  "remoteRelayToken": "",
+  "remoteDeviceId": "",
+  "remoteDeviceName": "",
+  "remoteReconnectMs": 5000,
+  "updateCheckUrl": ""
+}

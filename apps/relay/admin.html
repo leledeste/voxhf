@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>VoxHF Administration</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+  <script src="/admin/webauthn.js" defer></script>
+  <script src="/admin/admin.js" defer></script>
+</head>
+<body>
+  <main id="authView" class="auth-view">
+    <section class="auth-panel" aria-labelledby="authTitle">
+      <a class="wordmark" href="/admin" aria-label="VoxHF administration">
+        <span class="wordmark-mark">V</span>
+        <span>VoxHF</span>
+      </a>
+      <p class="eyebrow">Relay administration</p>
+      <h1 id="authTitle">Sign in</h1>
+      <p id="authLead" class="muted">Manage your private relay.</p>
+
+      <form id="loginForm" class="form-stack">
+        <label>
+          Username
+          <input id="loginUsername" autocomplete="username" required>
+        </label>
+        <label>
+          Password
+          <input id="loginPassword" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="button primary full" type="submit">Sign in</button>
+      </form>
+
+      <section id="mfaLoginPanel" class="form-stack hidden" aria-labelledby="mfaLoginTitle">
+        <div>
+          <h2 id="mfaLoginTitle">Verify your identity</h2>
+          <p class="muted">Use a passkey or one of your recovery codes.</p>
+        </div>
+        <button id="mfaPasskeyButton" class="button primary full" type="button">Use passkey</button>
+        <details id="mfaRecoveryPanel" class="recovery-panel">
+          <summary>Use a recovery code</summary>
+          <form id="mfaRecoveryForm" class="form-stack compact">
+            <label>
+              Recovery code
+              <input id="mfaRecoveryCode" autocomplete="one-time-code" required>
+            </label>
+            <button class="button secondary full" type="submit">Continue</button>
+          </form>
+        </details>
+        <button id="mfaCancelButton" class="text-button" type="button">Back to password</button>
+      </section>
+
+      <form id="bootstrapForm" class="form-stack hidden">
+        <label>
+          Owner username
+          <input id="bootstrapUsername" autocomplete="username" required>
+        </label>
+        <label>
+          Display name
+          <input id="bootstrapDisplayName" autocomplete="name" required>
+        </label>
+        <label>
+          Owner password
+          <input id="bootstrapPassword" type="password" autocomplete="new-password" minlength="10" required>
+        </label>
+        <label>
+          Bootstrap token
+          <input id="bootstrapToken" type="password" autocomplete="off" required>
+        </label>
+        <button class="button primary full" type="submit">Create owner</button>
+      </form>
+
+      <details id="recoveryPanel" class="recovery-panel">
+        <summary>Owner recovery</summary>
+        <form id="recoveryForm" class="form-stack compact">
+          <label>
+            Username
+            <input id="recoveryUsername" autocomplete="username" required>
+          </label>
+          <label>
+            New password
+            <input id="recoveryPassword" type="password" autocomplete="new-password" minlength="10" required>
+          </label>
+          <label>
+            Break-glass token
+            <input id="recoveryToken" type="password" autocomplete="off" required>
+          </label>
+          <button class="button secondary full" type="submit">Recover owner</button>
+        </form>
+      </details>
+      <p id="authStatus" class="form-status" role="status"></p>
+    </section>
+  </main>
+
+  <div id="adminApp" class="app-shell hidden">
+    <aside class="sidebar">
+      <a class="wordmark sidebar-brand" href="/admin">
+        <span class="wordmark-mark">V</span>
+        <span>VoxHF</span>
+      </a>
+      <nav class="main-nav" aria-label="Administration sections">
+        <button class="nav-item active" data-view="overview">Overview</button>
+        <button class="nav-item" data-view="users">Users</button>
+        <button class="nav-item" data-view="access">Access</button>
+        <button class="nav-item" data-view="devices">Devices</button>
+        <button class="nav-item" data-view="sessions">Sessions</button>
+        <button class="nav-item" data-view="security">Security</button>
+        <button class="nav-item" data-view="system">System</button>
+        <button class="nav-item" data-view="audit">Audit</button>
+      </nav>
+      <div class="sidebar-footer">
+        <strong id="adminName">Owner</strong>
+        <span id="adminRole">Owner</span>
+        <button id="logoutButton" class="text-button" type="button">Sign out</button>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Administration</p>
+          <h1 id="viewTitle">Overview</h1>
+        </div>
+        <div class="topbar-actions">
+          <span id="relayStatus" class="status-badge neutral">Checking relay</span>
+          <button id="refreshButton" class="button icon-button" type="button" title="Refresh" aria-label="Refresh">&#8635;</button>
+        </div>
+      </header>
+
+      <section class="view active" data-panel="overview">
+        <div id="overviewStats" class="stats-grid"></div>
+        <section class="content-section">
+          <div class="section-heading">
+            <div><p class="eyebrow">Current state</p><h2>Relay health</h2></div>
+          </div>
+          <dl id="overviewDetails" class="detail-grid"></dl>
+        </section>
+      </section>
+
+      <section class="view" data-panel="users">
+        <div class="section-heading page-heading">
+          <div><p class="eyebrow">Accounts</p><h2>Users</h2></div>
+          <input id="userSearch" class="search-input" type="search" placeholder="Search users" aria-label="Search users">
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>User</th><th>Status</th><th>Tokens</th><th>Created</th><th></th></tr></thead><tbody id="usersBody"></tbody></table></div>
+      </section>
+
+      <section class="view" data-panel="access">
+        <section class="content-section split-section">
+          <div>
+            <p class="eyebrow">Registration</p>
+            <h2>Invitation</h2>
+            <p id="inviteStatus" class="muted">Checking registration policy.</p>
+          </div>
+          <button id="createInviteButton" class="button primary" type="button">Create invite</button>
+        </section>
+        <pre id="secretReveal" class="secret-reveal hidden" aria-live="polite"></pre>
+        <section class="content-section">
+          <div class="section-heading"><div><p class="eyebrow">Browsers</p><h2>Active pairings</h2></div></div>
+          <div class="table-wrap"><table><thead><tr><th>User</th><th>Device</th><th>Browser</th><th>Last used</th><th></th></tr></thead><tbody id="pairingsBody"></tbody></table></div>
+        </section>
+      </section>
+
+      <section class="view" data-panel="devices">
+        <div class="section-heading page-heading"><div><p class="eyebrow">Agents</p><h2>Devices</h2></div></div>
+        <div class="table-wrap"><table><thead><tr><th>User</th><th>Device</th><th>Status</th><th>Pairings</th><th>Last seen</th></tr></thead><tbody id="devicesBody"></tbody></table></div>
+      </section>
+
+      <section class="view" data-panel="sessions">
+        <div class="section-heading page-heading">
+          <div><p class="eyebrow">Administration</p><h2>Sessions</h2></div>
+          <button id="revokeOthersButton" class="button secondary" type="button">Revoke other sessions</button>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Session</th><th>Created</th><th>Last activity</th><th>Expires</th><th></th></tr></thead><tbody id="sessionsBody"></tbody></table></div>
+      </section>
+
+      <section class="view" data-panel="security">
+        <section class="content-section narrow-section">
+          <div class="section-heading">
+            <div><p class="eyebrow">Optional protection</p><h2>Multi-factor authentication</h2></div>
+            <span id="mfaStatusBadge" class="status-badge neutral">Checking</span>
+          </div>
+          <p class="muted">Passkeys use your device lock, Face ID, Touch ID, Windows Hello, or a security key. MFA remains optional.</p>
+          <p id="mfaUnsupported" class="form-status hidden">This browser does not support passkeys. You can still sign in with your password.</p>
+          <div id="passkeysList" class="passkey-list"></div>
+          <form id="passkeyForm" class="form-stack">
+            <label>Passkey name<input id="passkeyName" autocomplete="off" maxlength="60" placeholder="MacBook Touch ID" required></label>
+            <label>Current password<input id="mfaCurrentPassword" type="password" autocomplete="current-password" required></label>
+            <div class="button-row">
+              <button id="addPasskeyButton" class="button primary" type="submit">Add passkey</button>
+              <button id="regenerateCodesButton" class="button secondary" type="button">New recovery codes</button>
+              <button id="disableMfaButton" class="button danger" type="button">Disable MFA</button>
+            </div>
+          </form>
+          <pre id="mfaRecoveryCodes" class="secret-reveal hidden" aria-live="polite"></pre>
+        </section>
+        <section class="content-section narrow-section">
+          <div class="section-heading"><div><p class="eyebrow">Credentials</p><h2>Change password</h2></div></div>
+          <form id="passwordForm" class="form-stack">
+            <label>Current password<input id="currentPassword" type="password" autocomplete="current-password" required></label>
+            <label>New password<input id="newPassword" type="password" autocomplete="new-password" minlength="10" required></label>
+            <label>Confirm new password<input id="confirmPassword" type="password" autocomplete="new-password" minlength="10" required></label>
+            <button class="button primary" type="submit">Change password</button>
+          </form>
+        </section>
+      </section>
+
+      <section class="view" data-panel="system">
+        <section class="content-section">
+          <div class="section-heading"><div><p class="eyebrow">Configuration</p><h2>System</h2></div></div>
+          <dl id="systemDetails" class="detail-grid"></dl>
+        </section>
+      </section>
+
+      <section class="view" data-panel="audit">
+        <div class="section-heading page-heading"><div><p class="eyebrow">Security events</p><h2>Audit</h2></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>User</th><th>Actor</th><th>Target</th><th>IP</th></tr></thead><tbody id="auditBody"></tbody></table></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+</body>
+</html>

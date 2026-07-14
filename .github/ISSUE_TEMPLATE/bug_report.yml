@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible VoxHF problem.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem. Do not include IVAO credentials, relay tokens, full raw traffic dumps, or private chat contents.
+  - type: input
+    id: version
+    attributes:
+      label: VoxHF version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Local proxy
+        - Webapp UI
+        - Radio/chat commands
+        - Voice RX
+        - Web TX
+        - Remote Preview relay
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the visible behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start VoxHF
+        2. Open the webapp
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste only the minimal relevant lines. Remove callsigns, tokens, IPs, and private text if needed.
+      render: text
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        Windows version:
+        Node.js version:
+        Browser:
+        Altitude version:
+        ffmpeg version:

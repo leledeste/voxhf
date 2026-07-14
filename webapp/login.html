@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Sign in to your VoxHF remote account.">
+  <title>Sign in | VoxHF</title>
+  <link rel="stylesheet" href="entry.css">
+</head>
+<body class="account-page">
+  <header class="site-header account-header">
+    <a class="site-brand" href="/" aria-label="VoxHF home">
+      <strong class="wordmark">Vox<span>HF</span></strong>
+    </a>
+    <a class="quiet-link" href="/">Back to home</a>
+  </header>
+
+  <main class="account-main">
+    <section class="account-intro">
+      <p class="eyebrow">Remote access</p>
+      <h1>Your cockpit follows you.</h1>
+      <p>Sign in on any browser to reach the VoxHF agent running beside Altitude.</p>
+      <div class="account-flow" aria-label="Connection flow">
+        <span>Altitude PC</span><i></i><span>VoxHF relay</span><i></i><span>This device</span>
+      </div>
+    </section>
+
+    <section class="account-panel" aria-labelledby="account-title">
+      <div class="account-tabs" role="tablist" aria-label="Account action">
+        <button id="login-tab" class="active" type="button" role="tab" aria-selected="true">Sign in</button>
+        <button id="register-tab" type="button" role="tab" aria-selected="false">Register</button>
+        <button id="recover-tab" type="button" role="tab" aria-selected="false">Recover</button>
+      </div>
+      <div class="account-heading">
+        <h2 id="account-title">Welcome back</h2>
+        <p id="account-copy">Continue to your VoxHF workspace.</p>
+      </div>
+      <form id="account-form" novalidate>
+        <label class="account-field">
+          <span>Username</span>
+          <input id="account-user" name="username" autocomplete="username" required placeholder="your username">
+        </label>
+        <label id="display-name-field" class="account-field hidden">
+          <span>Display name</span>
+          <input id="account-name" name="displayName" autocomplete="name" placeholder="how others see you">
+        </label>
+        <label id="invite-code-field" class="account-field hidden">
+          <span>Invitation code</span>
+          <input id="account-invite" name="inviteCode" autocomplete="one-time-code" spellcheck="false" placeholder="VHF-...">
+        </label>
+        <label id="recovery-code-field" class="account-field hidden">
+          <span>Recovery code</span>
+          <input id="account-recovery-code" name="recoveryCode" autocomplete="one-time-code" spellcheck="false" placeholder="VHF-RESET-...">
+        </label>
+        <label class="account-field">
+          <span id="password-label">Password</span>
+          <input id="account-password" name="password" type="password" autocomplete="current-password" required placeholder="your password">
+        </label>
+        <label id="confirm-password-field" class="account-field hidden">
+          <span>Confirm new password</span>
+          <input id="account-password-confirm" name="passwordConfirm" type="password" autocomplete="new-password" placeholder="repeat your new password">
+        </label>
+        <div id="legal-acceptance" class="legal-acceptance hidden">
+          <label>
+            <input id="accept-terms" type="checkbox">
+            <span>I accept this server's <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>, version <strong id="terms-version">1.0</strong>.</span>
+          </label>
+          <label>
+            <input id="acknowledge-privacy" type="checkbox">
+            <span>I have read the <a href="/privacy" target="_blank" rel="noopener noreferrer">VoxHF Privacy Policy</a>, version <strong id="privacy-version">1.0</strong>.</span>
+          </label>
+        </div>
+        <button id="account-submit" class="button button-primary account-submit" type="submit">Sign in</button>
+      </form>
+      <div id="account-status" class="account-status" role="status" aria-live="polite"></div>
+      <div id="agent-token-result" class="token-result hidden">
+        <strong>Save your agent token now</strong>
+        <p>This token is shown once. Add it as <code>remoteRelayToken</code> in <code>config.json</code> on the Altitude PC.</p>
+        <textarea id="agent-token" readonly aria-label="Agent token"></textarea>
+        <div class="token-actions">
+          <button id="copy-agent-token" class="button button-secondary" type="button">Copy token</button>
+          <button id="continue-to-app" class="button button-primary" type="button">Continue to app</button>
+        </div>
+      </div>
+      <details class="relay-options">
+        <summary>Use a self-hosted relay</summary>
+        <label class="account-field">
+          <span>Relay URL</span>
+          <input id="relay-url" autocomplete="url" inputmode="url" placeholder="wss://relay.voxhf.com">
+        </label>
+      </details>
+      <p class="account-legal-links"><a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a><a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a></p>
+    </section>
+  </main>
+  <script src="auth.js"></script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+services:
+  voxhf-relay:
+    build:
+      context: ../..
+      dockerfile: infra/docker/relay.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - defaults.env
+      - .env
+    environment:
+      VOXHF_RELAY_HOST: 0.0.0.0
+      VOXHF_RELAY_PORT: 8787
+      VOXHF_RELAY_DATA_DIR: /var/lib/voxhf-relay
+      VOXHF_RELAY_PAIRINGS_FILE: /var/lib/voxhf-relay/pairings.json
+    volumes:
+      - relay-data:/var/lib/voxhf-relay
+      - ${VOXHF_BACKUP_HOST_DIR:-./backups}:/var/backups/voxhf
+    expose:
+      - "8787"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - voxhf-relay
+    env_file:
+      - .env
+    environment:
+      LANDING_DOMAIN: ${LANDING_DOMAIN:-voxhf.com}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../webapp:/srv/voxhf-webapp:ro
+      - ${VOXHF_LEGAL_PRIVACY_FILE:-../../webapp/privacy.html}:/srv/voxhf-webapp/privacy.html:ro
+      - ${VOXHF_LEGAL_TERMS_FILE:-../../webapp/terms.html}:/srv/voxhf-webapp/terms.html:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  relay-data:
+  caddy-data:
+  caddy-config:
