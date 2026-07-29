@@ -1,6 +1,6 @@
 {
   "name": "voxhf",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.1-beta.1",
   "description": "Local IVAO Altitude bridge with browser radio, chat and voice controls.",
   "main": "proxy.js",
   "license": "AGPL-3.0-only",
@@ -20,9 +20,6 @@
     "relay:admin:test": "node scripts/test-relay-admin.js",
     "relay:mfa:preflight": "node scripts/check-admin-mfa-live.js",
     "relay:account:test": "node scripts/test-relay-account.js",
-    "directory:server": "node scripts/directory-server.js",
-    "directory:test": "node scripts/test-directory.js",
-    "directory:api:test": "node scripts/test-directory-api.js",
     "site:preview": "node scripts/preview-site.js",
     "setup:test": "node scripts/test-setup.js",
     "release:prepare": "node scripts/prepare-release.js",
@@ -53,6 +50,7 @@
     "@simplewebauthn/browser": "^13.2.0",
     "@simplewebauthn/server": "^13.3.1",
     "better-sqlite3": "^12.11.1",
+    "web-push": "^3.6.7",
     "ws": "^8.21.0"
   },
   "devDependencies": {

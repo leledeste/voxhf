@@ -23,6 +23,5 @@ COPY package.json package-lock.json ./
 COPY apps ./apps
 COPY packages ./packages
 COPY scripts/relay-backup.js ./scripts/relay-backup.js
-COPY scripts/directory-server.js ./scripts/directory-server.js
 
 CMD ["node", "apps/relay/index.js"]

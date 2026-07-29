@@ -29,7 +29,13 @@ repository and do not copy `node_modules` from the development PC.
 7. Restart Windows, then verify startup and retained configuration.
 8. If remote mode is used, verify PC plus phone simultaneously and reconnect
    after browser standby.
-9. Stop VoxHF and remove the extracted folder to confirm clean removal.
+9. Refresh both devices and verify that the current proxy session's chat is
+   recovered even when notification permission is disabled on one of them.
+10. Enable notifications separately on supported test devices, send a real
+    private message, lock the mobile screen, and verify delivery. Also verify a
+    public message beginning with the active callsign when a controller test is
+    available.
+11. Stop VoxHF and remove the extracted folder to confirm clean removal.
 
 The package passes only when no file from the source checkout is needed and no
 private token, `.env`, `config.json`, database, dump, or log exists in the ZIP.

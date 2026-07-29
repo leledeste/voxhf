@@ -1,0 +1,12 @@
+{
+  "id": "./app.html",
+  "name": "VoxHF",
+  "short_name": "VoxHF",
+  "description": "Flight communications companion for IVAO Altitude",
+  "start_url": "./app.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101822",
+  "theme_color": "#101822",
+  "categories": ["utilities", "travel"]
+}

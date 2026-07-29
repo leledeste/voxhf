@@ -595,6 +595,7 @@ select { cursor: pointer; }
   justify-content: flex-end;
   gap: 5px;
   overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: thin;
 }
 
@@ -610,6 +611,7 @@ select { cursor: pointer; }
 }
 
 .tab:hover { background: transparent; color: var(--text); }
+.tab:active { transform: none; }
 
 .tab.active {
   border-bottom-color: var(--primary);
@@ -941,6 +943,20 @@ select { cursor: pointer; }
 .auth-overlay { z-index: 28; }
 .settings-modal { z-index: 30; }
 
+.settings-modal {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  touch-action: manipulation;
+  -webkit-overflow-scrolling: touch;
+}
+
+body.settings-open {
+  position: fixed;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
+
 .dialog,
 .auth-panel,
 .settings-panel {
@@ -1056,7 +1072,8 @@ select { cursor: pointer; }
 
 .settings-panel {
   width: min(100%, 800px);
-  max-height: min(760px, 92dvh);
+  max-height: min(760px, calc(100vh - 32px));
+  max-height: min(760px, calc(100dvh - 32px));
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
@@ -1098,6 +1115,8 @@ select { cursor: pointer; }
 .settings-body {
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 14px;
 }
 
@@ -1189,6 +1208,49 @@ select { cursor: pointer; }
   }
 }
 
+/* On short tablet landscape screens keep controls and communications visible
+   together. Route weather spans the next row instead of being squeezed into
+   the small space left below the radio rail. */
+@media (max-width: 1250px) and (max-height: 900px) {
+  body { overflow: auto; }
+
+  .app {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .workspace {
+    grid-template-columns: minmax(300px, 350px) minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    height: auto;
+    overflow: visible;
+  }
+
+  .control-rail {
+    grid-column: 1;
+    grid-row: 1;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .info-rail {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .work {
+    grid-column: 2;
+    grid-row: 1;
+    height: auto;
+    min-height: 620px;
+    max-height: none;
+    overflow: hidden;
+  }
+}
+
 @media (max-width: 920px) {
   body { overflow: auto; }
 
@@ -1237,6 +1299,14 @@ select { cursor: pointer; }
     height: calc(100dvh - 90px);
     min-height: 620px;
     overflow: hidden;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* Avoid a Safari compositing layer over the Settings hit targets. */
+  .settings-modal {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 
@@ -1331,12 +1401,6 @@ select { cursor: pointer; }
 
   .update-notice button { display: none; }
 
-  /* Screenshot fixtures can isolate a lower workspace panel without changing
-     the normal mobile layout or requiring synthetic scroll coordinates. */
-  body[data-demo="1"].demo-panel-communications .control-rail,
-  body[data-demo="1"].demo-panel-communications .info-rail,
-  body[data-demo="1"].demo-panel-weather .control-rail,
-  body[data-demo="1"].demo-panel-weather .work { display: none; }
 }
 
 @media (max-width: 430px) {
@@ -1396,222 +1460,4 @@ select { cursor: pointer; }
   }
 
   .surface-heading { margin-bottom: 8px; }
-}
-
-/* Screenshot fixtures keep real controls at readable sizes while arranging
-   them into purpose-built 16:10 compositions. They never affect normal use. */
-body[data-demo="1"] .overlay,
-body[data-demo="1"] .auth-overlay,
-body[data-demo="1"] .settings-modal { display: none !important; }
-
-body[data-demo="1"].demo-panel-hero,
-body[data-demo="1"].demo-panel-overview,
-body[data-demo="1"].demo-panel-controls,
-body[data-demo="1"].demo-panel-voice,
-body[data-demo="1"].demo-panel-communications,
-body[data-demo="1"].demo-panel-weather { overflow: hidden; }
-
-body[data-demo="1"].demo-panel-hero .app,
-body[data-demo="1"].demo-panel-overview .app,
-body[data-demo="1"].demo-panel-controls .app,
-body[data-demo="1"].demo-panel-voice .app,
-body[data-demo="1"].demo-panel-communications .app,
-body[data-demo="1"].demo-panel-weather .app {
-  height: 100dvh;
-  min-height: 0;
-  overflow: hidden;
-}
-
-body[data-demo="1"].demo-panel-hero .workspace,
-body[data-demo="1"].demo-panel-overview .workspace,
-body[data-demo="1"].demo-panel-controls .workspace,
-body[data-demo="1"].demo-panel-voice .workspace,
-body[data-demo="1"].demo-panel-communications .workspace,
-body[data-demo="1"].demo-panel-weather .workspace {
-  width: 100%;
-  height: 100%;
-  max-width: 1600px;
-  min-height: 0;
-  margin: 0 auto;
-  overflow: hidden;
-}
-
-/* The overview fixture is a product triptych rather than a literal browser
-   screenshot: the live workspace stays central while its supporting controls
-   remain visible at a slightly smaller, matching height on either side. */
-body[data-demo="1"].demo-panel-overview .workspace {
-  grid-template-columns: minmax(330px, 360px) minmax(0, 1fr) minmax(330px, 360px);
-  align-items: center;
-  gap: 18px;
-  padding: 22px;
-}
-
-body[data-demo="1"].demo-panel-overview .control-rail,
-body[data-demo="1"].demo-panel-overview .info-rail {
-  height: min(750px, 100%);
-  max-height: min(750px, 100%);
-  overflow: hidden;
-}
-
-body[data-demo="1"].demo-panel-overview .work {
-  height: min(820px, 100%);
-  max-height: min(820px, 100%);
-  overflow: hidden;
-  box-shadow: var(--shadow);
-}
-
-body[data-demo="1"].demo-panel-overview .control-rail {
-  align-content: center;
-}
-
-body[data-demo="1"].demo-panel-overview .info-rail {
-  align-self: center;
-}
-
-body[data-demo="1"].demo-panel-overview .messages {
-  padding: 18px;
-}
-
-body[data-demo="1"].demo-panel-hero .workspace {
-  grid-template-columns: minmax(350px, 420px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 16px;
-  padding: 18px;
-}
-
-body[data-demo="1"].demo-panel-hero .control-rail {
-  grid-column: 1;
-  grid-row: 1 / span 2;
-  grid-template-columns: 1fr;
-  max-height: 100%;
-  overflow: auto;
-}
-
-body[data-demo="1"].demo-panel-hero .work {
-  grid-column: 2;
-  grid-row: 1;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
-body[data-demo="1"].demo-panel-hero .info-rail {
-  grid-column: 2;
-  grid-row: 2;
-  max-height: 280px;
-  overflow: auto;
-}
-
-body[data-demo="1"].demo-panel-hero .weather-panel,
-body[data-demo="1"].demo-panel-weather .weather-panel {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 18px;
-}
-
-body[data-demo="1"].demo-panel-hero .weather-card + .weather-card,
-body[data-demo="1"].demo-panel-weather .weather-card + .weather-card {
-  border-top: 0;
-  border-left: 1px solid var(--border);
-  padding-left: 18px;
-}
-
-body[data-demo="1"].demo-panel-controls .work,
-body[data-demo="1"].demo-panel-controls .info-rail,
-body[data-demo="1"].demo-panel-communications .control-rail,
-body[data-demo="1"].demo-panel-communications .info-rail,
-body[data-demo="1"].demo-panel-weather .control-rail,
-body[data-demo="1"].demo-panel-weather .work { display: none; }
-
-body[data-demo="1"].demo-panel-controls .topbar,
-body[data-demo="1"].demo-panel-communications .topbar,
-body[data-demo="1"].demo-panel-weather .topbar { display: none; }
-
-body[data-demo="1"].demo-panel-controls .workspace,
-body[data-demo="1"].demo-panel-communications .workspace,
-body[data-demo="1"].demo-panel-weather .workspace {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-  place-items: center;
-  padding: 34px;
-}
-
-body[data-demo="1"].demo-panel-controls .control-rail {
-  grid-column: 1;
-  grid-row: 1;
-  width: min(100%, 1380px);
-  max-height: none;
-  grid-template-columns: 1fr;
-  align-content: center;
-  gap: 16px;
-  overflow: visible;
-}
-
-body[data-demo="1"].demo-panel-controls .radio-surface,
-body[data-demo="1"].demo-panel-controls .xpdr-surface { padding: 22px; }
-
-body[data-demo="1"].demo-panel-controls .radio-stack {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-body[data-demo="1"].demo-panel-controls .radio + .radio {
-  margin-left: 22px;
-  padding-left: 22px;
-  border-top: 0;
-  border-left: 1px solid var(--border);
-}
-
-body[data-demo="1"].demo-panel-controls .xpdr-surface {
-  display: grid;
-  grid-template-columns: 240px minmax(440px, 760px);
-  align-items: center;
-  justify-content: space-between;
-  gap: 28px;
-}
-
-body[data-demo="1"].demo-panel-controls .xpdr-surface .surface-heading { margin: 0; }
-
-body[data-demo="1"].demo-panel-voice .info-rail,
-body[data-demo="1"].demo-panel-voice .xpdr-surface { display: none; }
-
-body[data-demo="1"].demo-panel-voice .workspace {
-  grid-template-columns: minmax(360px, 430px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-  gap: 18px;
-  padding: 24px;
-}
-
-body[data-demo="1"].demo-panel-voice .control-rail {
-  grid-column: 1;
-  grid-row: 1;
-  grid-template-columns: 1fr;
-  align-content: center;
-  max-height: 100%;
-  overflow: auto;
-}
-
-body[data-demo="1"].demo-panel-voice .work {
-  grid-column: 2;
-  grid-row: 1;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
-body[data-demo="1"].demo-panel-communications .work,
-body[data-demo="1"].demo-panel-weather .info-rail {
-  grid-column: 1;
-  grid-row: 1;
-  width: min(100%, 1420px);
-  height: 100%;
-  max-height: 100%;
-  margin: 0 auto;
-}
-
-body[data-demo="1"].demo-panel-communications .work { overflow: hidden; }
-
-body[data-demo="1"].demo-panel-weather .info-rail {
-  padding: 28px;
-  overflow: auto;
 }

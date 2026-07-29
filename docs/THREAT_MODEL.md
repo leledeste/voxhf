@@ -90,11 +90,6 @@ Controls:
 - No required official relay.
 - Clear privacy documentation.
 
-The public server directory does not remove this trust boundary. Server
-identity, source, and privacy links are operator declarations; a heartbeat
-only proves recent possession of a listing token. The central registry controls
-the `official` flag, and relay heartbeats cannot change listing identity.
-
 ### Audio Abuse
 
 Remote TX stays active after disconnect or is triggered without user intent.

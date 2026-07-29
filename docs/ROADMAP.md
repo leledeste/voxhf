@@ -19,6 +19,10 @@ status, not implementation history. Released changes belong in
 - COM1/COM2, UNICOM, `_OBS` filtering, and distance sorting.
 - Squawk, STBY/ALT, and IDENT.
 - Frequency, broadcast, private messaging, and command completion.
+- Session chat recovery across local and remote devices after refresh or
+  reconnect, independently of notification permission.
+- Per-device Web Push for incoming private messages and public messages that
+  begin with the active callsign.
 - METAR/TAF/ATIS, route weather, and plain-language weather interpretation.
 - Heartbeat and standby recovery.
 
@@ -40,8 +44,6 @@ status, not implementation history. Released changes belong in
 - SQLite users, agents, pairings, sessions, and audit events.
 - Admin panel, Docker Compose, and Caddy.
 - Remote controls, RX audio, TX audio, and update notices.
-- Opt-in public server directory with authenticated heartbeats, operator and
-  privacy links, access policy, and recent availability status.
 
 ### Installation And Operations
 
@@ -66,6 +68,8 @@ status, not implementation history. Released changes belong in
 - Automatic TX-session refresh works across channel and TS2 server changes,
   but should remain covered by live regression tests because the observed
   protocol can change.
+- Web Push delivery has been validated on Windows and on iOS with the screen
+  locked; a live controller-addressed message remains to be validated.
 
 ## Known Limitations
 
@@ -79,6 +83,8 @@ status, not implementation history. Released changes belong in
 - Self-hosted account and admin surfaces need broader production review.
 - The Local updater stages a new folder; it does not silently replace a running
   installation or provide signed Windows binaries yet.
+- iOS/iPadOS Web Push requires a supported OS version and a Home Screen
+  installation of the hosted webapp.
 
 ## Next Priorities
 
@@ -102,7 +108,6 @@ and operational work rather than repeating that completed functional test.
 - Broader weather abbreviation coverage, interpretation edge cases, and
   explanatory tooltips.
 - Controlled automatic ATIS and route-weather refresh.
-- Opt-in notifications for important private messages.
 - Experimental opt-in RX transcription with callsign context, without voice
   recording or persistent audio storage.
 - Structured clearance scratchpad.

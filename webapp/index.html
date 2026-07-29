@@ -24,7 +24,6 @@
       <a href="/" aria-current="page">Home</a>
       <a href="#how">How it works</a>
       <a href="setup.html">Setup</a>
-      <a href="servers.html">Servers</a>
       <a href="https://github.com/leledeste/voxhf" target="_blank" rel="noopener noreferrer">GitHub</a>
     </nav>
   </header>
@@ -35,7 +34,7 @@
         <p class="development-status"><span>In active development</span><strong>Public beta</strong></p>
         <h1 id="hero-title">Vox<span>HF</span></h1>
         <p class="hero-lead">Your IVAO communications, wherever you need them.</p>
-        <p class="hero-detail">A local-first browser console for radio, live voice, transponder controls, weather and network messages. Altitude stays on the simulator PC while the controls follow you to another screen.</p>
+        <p class="hero-detail">A local-first browser console for radio, live voice, transponder controls, weather and network messages, with session chat recovery and opt-in alerts. Altitude stays on the simulator PC while the controls follow you to another screen.</p>
         <div class="hero-actions">
           <a class="button primary-action" href="setup.html">Explore setup</a>
           <a class="button secondary-action" href="https://github.com/leledeste/voxhf" target="_blank" rel="noopener noreferrer">View source</a>
@@ -50,7 +49,7 @@
       <div class="capabilities-heading"><p class="eyebrow">Core controls</p><h2 id="capabilities-title">The essentials stay together.</h2></div>
       <div class="capability-grid">
         <article><span>01</span><h3>Radio and transponder</h3><p>Tune one active frequency on COM1 or COM2, transmit, and control squawk, STBY/ALT and IDENT.</p></article>
-        <article><span>02</span><h3>One focused workspace</h3><p>Keep messages, nearby stations, route weather and the controls used during a live flight together.</p></article>
+        <article><span>02</span><h3>Messages that follow the flight</h3><p>Recover the current session on every connected device and receive opt-in alerts for private or callsign-addressed messages.</p></article>
         <article><span>03</span><h3>Local control, remote reach</h3><p>Keep the IVAO connection on your simulator PC and choose whether the browser stays local or uses your relay.</p></article>
       </div>
     </section>
@@ -76,7 +75,7 @@
             <figure class="slide-media"><img src="assets/screenshots/feature-voice.png" alt="VoxHF browser voice transmission controls during a live frequency exchange" width="3200" height="1920" loading="lazy"></figure>
           </article>
           <article class="feature-slide">
-            <div class="slide-copy"><span>03 / Network messages</span><h3>Keep every conversation in its place.</h3><p>Send commands with autocomplete and separate frequency traffic from private controller or pilot conversations.</p></div>
+            <div class="slide-copy"><span>03 / Network messages</span><h3>Keep every conversation in its place.</h3><p>Separate frequency traffic from private conversations, recover the current proxy session across devices, and opt in to important message alerts.</p></div>
             <figure class="slide-media"><img src="assets/screenshots/feature-messages.png" alt="VoxHF network messages and command autocomplete" width="3200" height="1920" loading="lazy"></figure>
           </article>
           <article class="feature-slide">
@@ -129,7 +128,7 @@
     <section class="development-band">
       <div><p class="eyebrow">Project status</p><h2>Working software, now available as a public beta.</h2></div>
       <div class="status-ledger">
-        <div><strong>Working</strong><p>Local and remote COM, XPDR, messaging, weather, browser RX and microphone TX.</p></div>
+        <div><strong>Working</strong><p>Local and remote COM, XPDR, messaging, session recovery, notifications, weather, browser RX and microphone TX.</p></div>
         <div><strong>In validation</strong><p>Clean installation, VPS recovery, compatibility checks and broader security review.</p></div>
         <div><strong>Next</strong><p>Independent review, beta feedback and stabilization toward a release candidate.</p></div>
       </div>
@@ -141,7 +140,8 @@
         <details><summary>Does VoxHF replace Altitude?</summary><div class="faq-answer"><p>No. Altitude and PilotCore retain the IVAO connection. VoxHF adds a browser control and communications surface around them.</p></div></details>
         <details><summary>Can I use only the local version?</summary><div class="faq-answer"><p>Yes. Local Slim requires no account, relay or public network access.</p></div></details>
         <details><summary>Can I connect to somebody else's server?</summary><div class="faq-answer"><p>Yes. The operator provides the app address and account access. Review the operator before trusting an independent server.</p></div></details>
-        <details><summary>Does VoxHF store voice or chat?</summary><div class="faq-answer"><p>Default installations relay live audio and messages without recording voice or maintaining persistent full chat history. Independent operators control their own deployments.</p></div></details>
+        <details><summary>Does VoxHF store voice or chat?</summary><div class="faq-answer"><p>Voice is not recorded. The local proxy keeps a bounded recent chat only while that proxy session is running so every connected device can recover it after a refresh; the relay does not persist it.</p></div></details>
+        <details><summary>How do notifications work?</summary><div class="faq-answer"><p>They are enabled separately on each supported device. The local proxy sends alerts for private messages and public messages beginning with your active callsign; notification permission does not control chat recovery. On iPhone and iPad, add the hosted app to the Home Screen before enabling them. <a href="setup.html#ios-notifications">Read the iOS instructions.</a></p></div></details>
         <details><summary>Is VoxHF an official IVAO product?</summary><div class="faq-answer"><p>No. VoxHF is independent, unofficial and not affiliated with or endorsed by IVAO.</p></div></details>
       </div>
     </section>
@@ -156,7 +156,7 @@
     <div class="footer-main">
       <div class="footer-intro"><a class="site-brand" href="/"><strong class="wordmark">Vox<span>HF</span></strong></a><p>Open-source flight communications for IVAO Altitude, built to stay local first.</p><span>In active development &middot; Public beta</span></div>
       <div class="footer-links">
-        <div><strong>Explore</strong><a href="/">Home</a><a href="setup.html">Setup</a><a href="servers.html">Servers</a></div>
+        <div><strong>Explore</strong><a href="/">Home</a><a href="setup.html">Setup</a></div>
         <div><strong>Resources</strong><a href="https://github.com/leledeste/voxhf#readme">Documentation</a><a href="https://github.com/leledeste/voxhf/releases">Releases</a><a href="https://github.com/leledeste/voxhf">Source code</a></div>
         <div><strong>Project</strong><a href="https://github.com/leledeste/voxhf/blob/main/SECURITY.md">Security</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="https://github.com/leledeste/voxhf/blob/main/LICENSE">AGPL-3.0</a></div>
       </div>

@@ -376,65 +376,6 @@ npm run relay:db:user -- delete user1 --db /var/lib/voxhf-relay/voxhf.db
 The Docker database lives in the named relay volume. Prefer the admin panel for
 normal operations and use the CLI only where the database path is mounted.
 
-## Optional Public Directory
-
-A self-hosted server is private by default and never appears in the public
-directory automatically. Listing is an explicit agreement between the server
-operator and the VoxHF directory administrator.
-
-The directory administrator creates the public identity and a dedicated
-heartbeat token. The operator then adds only these values to the private
-`infra/docker/.env`:
-
-```env
-VOXHF_DIRECTORY_PUBLISH=true
-VOXHF_DIRECTORY_HEARTBEAT_URL=https://voxhf.com/directory/api/heartbeat
-VOXHF_DIRECTORY_HEARTBEAT_TOKEN=replace-with-issued-hex-token
-```
-
-Restart the relay after changing `.env`. The heartbeat publishes the running
-VoxHF version and whether registration is open. It does not publish user
-counts, account details, messages, radio state, audio, or IVAO traffic.
-
-The public listing is self-declared. A recent heartbeat proves only that the
-listed relay contacted the directory; it is not a security, privacy, source,
-or uptime certification. Operators must provide accurate operator, privacy,
-and source information and keep it current.
-
-### Central Registry Administration
-
-Only the central directory host should set:
-
-```env
-VOXHF_DIRECTORY_REGISTRY_ENABLED=true
-```
-
-On the Docker host, create a listing in the live registry database with:
-
-```bash
-docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env \
-  exec voxhf-relay node scripts/directory-server.js add community-eu \
-  --name "Community EU" \
-  --operator "Example operator" \
-  --region "Europe" \
-  --access invite \
-  --app https://app.example.com \
-  --relay https://relay.example.com \
-  --privacy https://example.com/privacy \
-  --source https://github.com/example/voxhf
-```
-
-During local development, the equivalent command is
-`npm run directory:server -- add ...`.
-
-The generated heartbeat token is shown once. Send it privately to the
-operator. Use `rotate`, `disable`, `maintenance-on`, or `delete` from the same
-CLI when the listing changes.
-
-The `--official` flag is reserved for a server operated by the VoxHF project.
-An official listing is sorted first and labelled **VoxHF operated**. A server
-cannot claim that status through its heartbeat.
-
 ## Backup
 
 Back up:
@@ -533,6 +474,9 @@ notice without interrupting a flight.
 - Expose only `80`, `443`, and the required SSH source range.
 - Never publish `.env`, `config.json`, database files, or logs with tokens.
 - Review admin/audit events and revoke lost browser sessions or agent tokens.
+- Verify that `sw.js` and `manifest.webmanifest` are served by the app domain
+  without long-lived caching, then test per-device notifications and
+  multi-device session chat recovery through the connected local agent.
 - Keep local VoxHF proxy ports private.
 - Do not add voice recording or chat persistence without a separate privacy
   design and user consent.

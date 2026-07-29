@@ -18,7 +18,7 @@
           "update:download": "node scripts/update-local.js download",
           "update:stage": "node scripts/update-local.js stage"
         },
-        "dependencies": ["ws"]
+        "dependencies": ["web-push", "ws"]
       },
       "paths": [
         "README.md",
@@ -76,7 +76,6 @@
           "relay:db:import-users": "node scripts/import-relay-users.js",
           "relay:db:user": "node scripts/relay-db-user.js",
           "relay:backup": "node scripts/relay-backup.js",
-          "directory:server": "node scripts/directory-server.js",
           "relay:mfa:preflight": "node scripts/check-admin-mfa-live.js"
         },
         "dependencies": ["@simplewebauthn/browser", "@simplewebauthn/server", "better-sqlite3", "ws"]
@@ -99,7 +98,6 @@
         "scripts/import-relay-users.js",
         "scripts/relay-db-user.js",
         "scripts/relay-backup.js",
-        "scripts/directory-server.js",
         "scripts/check-admin-mfa-live.js"
       ]
     },
@@ -123,7 +121,7 @@
         "scripts",
         "webapp",
         "README.md",
-        "CLAUDE.md",
+        "AGENTS.md",
         "CHANGELOG.md",
         "SECURITY.md",
         "LICENSE",

@@ -463,8 +463,8 @@ button, input, select { font: inherit; letter-spacing: 0; }
 .public-footer .footer-links a:hover { color: #ffffff; }
 .public-footer .footer-bottom { width: min(1220px, 100%); margin-left: auto; margin-right: auto; border-color: #2f423c; color: #7f8f89; }
 
-/* Setup and directory pages reuse the public visual language without turning
-   procedural content into a collection of nested cards. */
+/* Setup pages reuse the public visual language without turning procedural
+   content into a collection of nested cards. */
 .page-hero {
   width: min(100%, 1540px);
   margin: 0 auto;
@@ -475,9 +475,7 @@ button, input, select { font: inherit; letter-spacing: 0; }
 .page-hero > p:last-child { max-width: 760px; margin: 28px 0 0; color: var(--muted); font-size: 19px; line-height: 1.65; }
 
 .route-index,
-.setup-route,
-.directory-shell,
-.directory-disclaimer {
+.setup-route {
   width: min(100%, 1400px);
   margin: 0 auto;
   padding-left: clamp(20px, 5vw, 72px);
@@ -515,8 +513,7 @@ pre {
   font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
-.step-content code,
-.directory-disclaimer code {
+.step-content code {
   padding: 2px 5px;
   border: 1px solid var(--line);
   border-radius: 2px;
@@ -538,74 +535,6 @@ pre {
   color: var(--ink);
   cursor: pointer;
 }
-
-.directory-disclaimer {
-  padding-top: 24px;
-  padding-bottom: 24px;
-  border-top: 1px solid var(--line-strong);
-  border-bottom: 1px solid var(--line-strong);
-}
-
-.directory-disclaimer strong { display: block; font-size: 13px; }
-.directory-disclaimer p { max-width: 1050px; margin: 7px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
-
-.directory-shell { padding-top: 54px; padding-bottom: 120px; }
-.directory-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: end; }
-.directory-tools label { display: grid; gap: 6px; color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
-.directory-tools input,
-.directory-tools select {
-  min-height: 42px;
-  padding: 0 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  background: var(--paper);
-  color: var(--ink);
-}
-
-.server-list { display: grid; gap: 16px; margin-top: 38px; }
-.server-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  align-items: start;
-  gap: 22px 32px;
-  padding: 24px;
-  border: 1px solid var(--line-strong);
-  background: var(--paper);
-}
-
-.server-row.is-official { border-top: 3px solid var(--teal); background: color-mix(in srgb, var(--teal-soft) 52%, transparent); }
-.server-name { min-width: 0; }
-.server-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; }
-.server-name strong { display: block; font-size: 17px; }
-.server-name p { max-width: 720px; margin: 7px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
-.server-meta { color: var(--muted); font-size: 12px; }
-.server-kind { color: var(--teal-strong); font-size: 10px; font-weight: 850; text-transform: uppercase; }
-.server-facts { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 26px; padding-top: 18px; border-top: 1px solid var(--line); }
-.server-fact { display: grid; align-content: start; gap: 6px; min-width: 0; }
-.server-fact-label { color: var(--quiet); font-size: 9px; font-weight: 850; text-transform: uppercase; }
-.server-links { display: flex; flex-wrap: wrap; gap: 8px 12px; }
-.server-links a { color: var(--teal-strong); font-size: 11px; font-weight: 800; text-decoration: none; }
-.server-links a:hover { text-decoration: underline; }
-
-.server-state { display: inline-flex; align-items: center; gap: 9px; font-size: 11px; font-weight: 850; text-transform: uppercase; }
-.server-state::before { content: ""; width: 3px; height: 22px; background: var(--line-strong); }
-.server-state.online::before { background: var(--starboard); }
-.server-state.maintenance::before { background: var(--amber); }
-.server-state.offline::before { background: var(--port); }
-.server-status-cell { display: grid; justify-items: end; gap: 7px; }
-.server-open { color: var(--teal-strong); font-size: 12px; font-weight: 850; text-decoration: none; }
-.server-open:hover { text-decoration: underline; }
-.directory-empty { padding: 42px 0; color: var(--muted); border-bottom: 1px solid var(--line-strong); }
-
-.servers-page { background: #ffffff; }
-.servers-page .site-header { background: #ffffff; backdrop-filter: none; }
-.servers-page .page-hero { width: min(100%, 1400px); padding-top: clamp(54px, 6vw, 76px); padding-bottom: clamp(58px, 6vw, 82px); }
-.servers-page .page-hero h1 { max-width: 900px; color: var(--teal-strong); font-size: clamp(54px, 6.8vw, 92px); }
-.servers-page .page-hero > p:last-child { max-width: 700px; }
-.servers-page .directory-shell,
-.servers-page .directory-disclaimer { width: min(1220px, calc(100% - 48px)); padding-left: 0; padding-right: 0; }
-.servers-page .directory-shell { padding-bottom: 48px; }
-.servers-page .directory-disclaimer { margin-bottom: clamp(82px, 9vw, 118px); }
 
 .legal-page {
   width: min(100%, 1040px);
@@ -641,7 +570,6 @@ pre {
   .architecture-line { grid-template-columns: 1fr; gap: 8px; }
   .architecture-line i { width: 1px; height: 22px; margin-left: 12px; }
   .step { grid-template-columns: 42px minmax(150px, .36fr) minmax(0, 1fr); }
-  .server-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .legal-page section { grid-template-columns: 1fr; gap: 10px; }
   .legal-page section a { grid-column: 1; }
 }
@@ -651,7 +579,7 @@ pre {
   .public-footer { padding-left: 18px; padding-right: 18px; }
   .public-footer .footer-links { grid-template-columns: 1fr 1fr; }
   .site-brand .wordmark { font-size: 24px; }
-  .site-nav a:not([href="setup.html"]):not([href="servers.html"]) { display: none; }
+  .site-nav a:not([href="setup.html"]) { display: none; }
   .site-nav { max-width: none; flex-wrap: nowrap; }
   .hero { min-height: auto; padding-top: 58px; }
   .hero h1 { font-size: clamp(64px, 24vw, 100px); }
@@ -670,11 +598,4 @@ pre {
   .step { grid-template-columns: 34px minmax(0, 1fr); gap: 14px; }
   .step h3 { grid-column: 2; }
   .step-content { grid-column: 2; }
-  .directory-tools { grid-template-columns: 1fr 1fr; }
-  .directory-tools label:first-child { grid-column: 1 / -1; }
-  .server-row { grid-template-columns: 1fr; padding: 18px; }
-  .server-status-cell { justify-items: start; }
-  .server-facts { grid-column: 1; gap: 16px; }
-  .servers-page .directory-shell,
-  .servers-page .directory-disclaimer { width: calc(100% - 32px); }
 }

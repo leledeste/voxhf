@@ -81,25 +81,6 @@ const MINIMUM_AGENT_VERSION = validateVersionText(
   process.env.VOXHF_RELAY_MINIMUM_AGENT_VERSION || '',
   ''
 );
-// The public directory is optional. The official registry accepts only
-// authenticated heartbeat data; listing identity and the official marker stay
-// under registry-admin control in SQLite.
-const DIRECTORY_REGISTRY_ENABLED = parseBool(process.env.VOXHF_DIRECTORY_REGISTRY_ENABLED, false);
-const DIRECTORY_ONLINE_TTL_MS = clampInteger(
-  process.env.VOXHF_DIRECTORY_ONLINE_TTL_MS,
-  5 * 60 * 1000,
-  60 * 1000,
-  60 * 60 * 1000
-);
-const DIRECTORY_PUBLISH_ENABLED = parseBool(process.env.VOXHF_DIRECTORY_PUBLISH, false);
-const DIRECTORY_HEARTBEAT_URL = validateDirectoryEndpoint(process.env.VOXHF_DIRECTORY_HEARTBEAT_URL || '');
-const DIRECTORY_HEARTBEAT_TOKEN = String(process.env.VOXHF_DIRECTORY_HEARTBEAT_TOKEN || '').trim();
-const DIRECTORY_HEARTBEAT_MS = clampInteger(
-  process.env.VOXHF_DIRECTORY_HEARTBEAT_MS,
-  60 * 1000,
-  15 * 1000,
-  15 * 60 * 1000
-);
 const ADMIN_HTML_FILE = path.join(__dirname, 'admin.html');
 const ADMIN_ASSET_FILES = Object.freeze({
   '/admin/admin.css': { path: path.join(__dirname, 'admin.css'), type: 'text/css; charset=utf-8' },
@@ -161,7 +142,6 @@ const pairingCodes = new Map();
 const registrationInvites = new Map();
 const browserAuthorizations = new Map();
 const httpRateStates = new Map();
-const directoryHeartbeatTimes = new Map();
 loadPersistedPairings();
 runDataMaintenance();
 const maintenanceTimer = setInterval(runDataMaintenance, 24 * 60 * 60 * 1000);
@@ -172,6 +152,9 @@ maintenanceTimer.unref?.();
 const BROWSER_TO_AGENT_TYPES = new Set([
   MESSAGE_TYPES.RADIO_SET,
   MESSAGE_TYPES.CHAT_SEND,
+  MESSAGE_TYPES.CHAT_HISTORY_REQUEST,
+  MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE,
+  MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE,
   MESSAGE_TYPES.WEATHER_REQUEST,
   MESSAGE_TYPES.ATIS_REQUEST,
   MESSAGE_TYPES.XPDR_SET_SQUAWK,
@@ -190,6 +173,8 @@ const AGENT_TO_BROWSER_TYPES = new Set([
   MESSAGE_TYPES.STATIONS_STATE,
   MESSAGE_TYPES.WEATHER_STATE,
   MESSAGE_TYPES.CHAT_MESSAGE,
+  MESSAGE_TYPES.CHAT_HISTORY,
+  MESSAGE_TYPES.NOTIFICATION_STATE,
 ]);
 
 const server = http.createServer((req, res) => {
@@ -205,18 +190,6 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && ADMIN_ASSET_FILES[url.pathname]) {
     return sendAdminAsset(res, ADMIN_ASSET_FILES[url.pathname]);
-  }
-
-  if (url.pathname.startsWith('/directory/api/')) {
-    handleDirectoryApi(req, res, url).catch((err) => {
-      if (isApiError(err)) {
-        sendJson(req, res, err.status, { ok: false, code: err.code, error: err.message });
-        return;
-      }
-      console.error(`[relay-directory] ${err.stack || err.message}`);
-      sendJson(req, res, 500, { ok: false, error: 'internal error' });
-    });
-    return;
   }
 
   if (url.pathname.startsWith('/account/api/')) {
@@ -257,73 +230,6 @@ const server = http.createServer((req, res) => {
 
   sendJson(req, res, 404, { ok: false, error: 'not found' });
 });
-
-async function handleDirectoryApi(req, res, url) {
-  if (!DIRECTORY_REGISTRY_ENABLED) {
-    return sendJson(req, res, 404, { ok: false, error: 'directory is disabled' });
-  }
-
-  if (req.method === 'GET' && url.pathname === '/directory/api/servers') {
-    const now = Date.now();
-    const servers = withDirectoryDatabase((db) => require('./db').listPublicDirectoryServers(db))
-      .map((server) => ({
-        id: server.slug,
-        name: server.name,
-        operator: server.operator,
-        region: server.region || '',
-        description: server.description || '',
-        access: server.access,
-        status: directoryServerStatus(server, now),
-        official: server.official,
-        appUrl: server.appUrl,
-        relayUrl: server.relayUrl || '',
-        privacyUrl: server.privacyUrl || '',
-        sourceUrl: server.sourceUrl || '',
-        version: server.version || '',
-        registrationOpen: server.registrationOpen,
-        lastSeenAt: server.lastSeenAt,
-      }));
-    return sendJson(req, res, 200, {
-      ok: true,
-      generatedAt: new Date(now).toISOString(),
-      servers,
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/directory/api/heartbeat') {
-    // Invalid tokens must not become an unbounded stream of SQLite lookups.
-    // This IP-level guard complements the per-listing heartbeat interval below.
-    if (!allowHttpAttempt(req, res, 'directory-heartbeat', MAX_AUTH_ATTEMPTS_PER_WINDOW)) return;
-    const token = readBearerToken(req);
-    if (!isDirectoryHeartbeatToken(token)) {
-      return sendJson(req, res, 401, { ok: false, error: 'invalid heartbeat credentials' });
-    }
-    const tokenHash = hashSecretHex(token);
-    const previous = directoryHeartbeatTimes.get(tokenHash) || 0;
-    if (Date.now() - previous < 10 * 1000) {
-      return sendJson(req, res, 429, { ok: false, error: 'heartbeat sent too frequently' });
-    }
-    const body = await readJsonBody(req, 4 * 1024);
-    const result = withDirectoryDatabase((db) => require('./db').updateDirectoryHeartbeat(db, {
-      tokenHash,
-      version: validateVersionText(body.version || '', ''),
-      registrationOpen: body.registrationOpen === true,
-    }));
-    if (!result.count) {
-      return sendJson(req, res, 401, { ok: false, error: 'invalid heartbeat credentials' });
-    }
-    directoryHeartbeatTimes.set(tokenHash, Date.now());
-    return sendJson(req, res, 200, { ok: true, receivedAt: result.lastSeenAt });
-  }
-
-  return sendJson(req, res, 404, { ok: false, error: 'not found' });
-}
-
-function directoryServerStatus(server, now = Date.now()) {
-  if (server.maintenance) return 'maintenance';
-  const lastSeen = new Date(server.lastSeenAt || 0).getTime();
-  return Number.isFinite(lastSeen) && now - lastSeen <= DIRECTORY_ONLINE_TTL_MS ? 'online' : 'offline';
-}
 
 const wss = new WebSocket.Server({
   noServer: true,
@@ -1897,6 +1803,7 @@ function rememberDeviceSnapshot(device, message) {
     || message.type === MESSAGE_TYPES.RADIO_STATE
     || message.type === MESSAGE_TYPES.STATIONS_STATE
     || message.type === MESSAGE_TYPES.WEATHER_STATE
+    || message.type === MESSAGE_TYPES.NOTIFICATION_STATE
   ) {
     device.lastMessages.set(message.type, message);
   }
@@ -1904,7 +1811,13 @@ function rememberDeviceSnapshot(device, message) {
 }
 
 function sendCachedDeviceState(ws, device) {
-  for (const type of [MESSAGE_TYPES.AGENT_STATUS, MESSAGE_TYPES.RADIO_STATE, MESSAGE_TYPES.STATIONS_STATE, MESSAGE_TYPES.WEATHER_STATE]) {
+  for (const type of [
+    MESSAGE_TYPES.AGENT_STATUS,
+    MESSAGE_TYPES.RADIO_STATE,
+    MESSAGE_TYPES.STATIONS_STATE,
+    MESSAGE_TYPES.WEATHER_STATE,
+    MESSAGE_TYPES.NOTIFICATION_STATE,
+  ]) {
     const message = device.lastMessages?.get(type);
     if (message) send(ws, message);
   }
@@ -2926,15 +2839,6 @@ function recordAuditEvent(input) {
   }
 }
 
-function withDirectoryDatabase(callback) {
-  const db = require('./db').openRelayDatabase();
-  try {
-    return callback(db);
-  } finally {
-    db.close();
-  }
-}
-
 function runDataMaintenance() {
   purgeExpiredRegistrationInvites();
   try {
@@ -3253,53 +3157,6 @@ function validateHttpUrl(value, fallback) {
   return fallback;
 }
 
-function validateDirectoryEndpoint(value) {
-  const text = String(value || '').trim();
-  if (!text) return '';
-  try {
-    const parsed = new URL(text);
-    const local = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
-    if ((parsed.protocol === 'https:' || (parsed.protocol === 'http:' && local))
-        && parsed.pathname === '/directory/api/heartbeat') return parsed.toString();
-  } catch (_) {}
-  console.warn('[relay-directory] Ignoring invalid heartbeat URL. Use HTTPS and the /directory/api/heartbeat path.');
-  return '';
-}
-
-function isDirectoryHeartbeatToken(value) {
-  return typeof value === 'string' && /^[A-Fa-f0-9]{64,128}$/.test(value);
-}
-
-function hashSecretHex(value) {
-  return crypto.createHash('sha256').update(String(value)).digest('hex');
-}
-
-async function publishDirectoryHeartbeat() {
-  if (!DIRECTORY_PUBLISH_ENABLED) return;
-  if (!DIRECTORY_HEARTBEAT_URL || !isDirectoryHeartbeatToken(DIRECTORY_HEARTBEAT_TOKEN)) {
-    console.warn('[relay-directory] Publishing is enabled but heartbeat URL/token is incomplete.');
-    return;
-  }
-
-  try {
-    const response = await fetch(DIRECTORY_HEARTBEAT_URL, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${DIRECTORY_HEARTBEAT_TOKEN}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        version: APP_VERSION,
-        registrationOpen: ENABLE_ACCOUNT_REGISTRATION,
-      }),
-      signal: AbortSignal.timeout(10 * 1000),
-    });
-    if (!response.ok) console.warn(`[relay-directory] Heartbeat rejected with HTTP ${response.status}.`);
-  } catch (err) {
-    console.warn(`[relay-directory] Heartbeat failed: ${err.message}`);
-  }
-}
-
 function clampInteger(value, fallback, min, max) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
@@ -3337,10 +3194,4 @@ server.listen(PORT, HOST, () => {
   console.log(`[relay] Auth mode: ${RELAY_AUTH_MODE}`);
   console.log(`[relay] Configured relay users: ${relayUsers.size}`);
   console.log(`[relay] Browser pairing: ${REQUIRE_PAIRING ? 'required' : 'disabled'}`);
-  if (DIRECTORY_REGISTRY_ENABLED) console.log('[relay-directory] Public registry API enabled.');
-  if (DIRECTORY_PUBLISH_ENABLED) {
-    publishDirectoryHeartbeat();
-    const timer = setInterval(publishDirectoryHeartbeat, DIRECTORY_HEARTBEAT_MS);
-    timer.unref?.();
-  }
 });

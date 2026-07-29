@@ -14,7 +14,7 @@ const root = path.resolve(__dirname, '..');
 // These files describe or run the current public package.
 const requiredFiles = [
   'README.md',
-  'CLAUDE.md',
+  'AGENTS.md',
   'docs/README.md',
   'docs/ROADMAP.md',
   'docs/SELF_HOSTING.md',
@@ -44,6 +44,7 @@ const requiredFiles = [
   'proxy/fsd-proxy.js',
   'proxy/fsd-parser.js',
   'proxy/local-web-server.js',
+  'proxy/push-notifications.js',
   'proxy/ogg-speex.js',
   'proxy/pilot-bridge.js',
   'proxy/pilot-core.js',
@@ -69,6 +70,7 @@ const requiredFiles = [
   'apps/relay/migrations/005_account_recovery.sql',
   'apps/relay/migrations/006_server_directory.sql',
   'apps/relay/migrations/007_legal_acceptance.sql',
+  'apps/relay/migrations/008_remove_server_directory.sql',
   'apps/relay/README.md',
   'apps/relay/.env.example',
   'infra/docker/relay.Dockerfile',
@@ -91,6 +93,8 @@ const requiredFiles = [
   'scripts/set-release-version.js',
   'scripts/update-local.js',
   'scripts/test-local-update.js',
+  'scripts/test-chat-history.js',
+  'scripts/test-push-notifications.js',
   'scripts/relay-db-user.js',
   'scripts/relay-backup.js',
   'scripts/test-relay-backup.js',
@@ -102,13 +106,9 @@ const requiredFiles = [
   'scripts/check-admin-mfa-live.js',
   'scripts/check-remote-preview.js',
   'scripts/test-remote-preview.js',
-  'scripts/directory-server.js',
-  'scripts/test-directory.js',
-  'scripts/test-directory-api.js',
   'scripts/preview-site.js',
   'webapp/index.html',
   'webapp/setup.html',
-  'webapp/servers.html',
   'webapp/privacy.html',
   'webapp/terms.html',
   'webapp/login.html',
@@ -118,10 +118,11 @@ const requiredFiles = [
   'webapp/landing.css',
   'webapp/setup.css',
   'webapp/site.js',
-  'webapp/servers.js',
   'webapp/auth.js',
   'webapp/styles.css',
   'webapp/app.js',
+  'webapp/manifest.webmanifest',
+  'webapp/sw.js',
   'webapp/release.json',
   'docs/ADMIN_REDESIGN.md',
   'config.example.json',
@@ -190,7 +191,6 @@ function runNodeScript(relativePath) {
 function checkWebappReferences() {
   const landing = fs.readFileSync(filePath('webapp/index.html'), 'utf8');
   const setup = fs.readFileSync(filePath('webapp/setup.html'), 'utf8');
-  const servers = fs.readFileSync(filePath('webapp/servers.html'), 'utf8');
   const privacy = fs.readFileSync(filePath('webapp/privacy.html'), 'utf8');
   const terms = fs.readFileSync(filePath('webapp/terms.html'), 'utf8');
   const login = fs.readFileSync(filePath('webapp/login.html'), 'utf8');
@@ -218,9 +218,6 @@ function checkWebappReferences() {
       || !setup.includes('src="site.js"')) {
     throw new Error('setup page assets are not linked');
   }
-  if (!servers.includes('href="site.css"') || !servers.includes('src="servers.js"')) {
-    throw new Error('server directory assets are not linked');
-  }
   if (!landing.includes('href="privacy.html"') || !landing.includes('href="terms.html"')
       || !privacy.includes('href="site.css"') || !terms.includes('href="site.css"')) {
     throw new Error('public legal pages are not linked');
@@ -237,7 +234,7 @@ function checkWebappReferences() {
       || !login.includes('href="/terms"') || !login.includes('href="/privacy"')) {
     throw new Error('login page assets are not linked');
   }
-  if (!app.includes('href="styles.css"') || !app.includes('src="app.js"')) {
+  if (!/href="styles\.css(?:\?[^"]+)?"/.test(app) || !/src="app\.js(?:\?[^"]+)?"/.test(app)) {
     throw new Error('workspace assets are not linked');
   }
 }
@@ -361,6 +358,66 @@ function checkRemoteProtocol() {
     { source: protocol.MESSAGE_SOURCES.BROWSER }
   );
   if (forgedAgentStatus.ok) throw new Error('agent.status accepted from browser source');
+
+  const historyRequest = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.CHAT_HISTORY_REQUEST, {}, 'check-history-request'),
+    { source: protocol.MESSAGE_SOURCES.BROWSER }
+  );
+  if (!historyRequest.ok) throw new Error(`valid chat history request rejected: ${historyRequest.error}`);
+
+  const chatHistory = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.CHAT_HISTORY, {
+      messages: [{
+        sender: 'LIMC_TWR',
+        recipient: 'WZZ2807',
+        text: 'Private message',
+        timestamp: '2026-07-28T12:00:00.000Z',
+        direction: 'incoming',
+        messageId: 'local-history-123',
+      }],
+    }, 'check-history'),
+    { source: protocol.MESSAGE_SOURCES.AGENT }
+  );
+  if (!chatHistory.ok) throw new Error(`valid chat history rejected: ${chatHistory.error}`);
+
+  const notificationSubscription = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE, {
+      endpoint: 'https://push.example/subscription/123',
+      p256dh: 'P256DH_123456789',
+      auth: 'AUTH_123456789',
+      deviceId: 'browser-12345678',
+      deviceName: 'iPad Home Screen',
+      appUrl: 'https://app.example/app.html',
+    }, 'check-notification-subscribe'),
+    { source: protocol.MESSAGE_SOURCES.BROWSER }
+  );
+  if (!notificationSubscription.ok) {
+    throw new Error(`valid notification subscription rejected: ${notificationSubscription.error}`);
+  }
+
+  const forgedNotificationSubscription = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE, {
+      endpoint: 'https://push.example/subscription/123',
+      p256dh: 'P256DH_123456789',
+      auth: 'AUTH_123456789',
+      deviceId: 'browser-12345678',
+      deviceName: 'iPad Home Screen',
+      appUrl: 'https://app.example/app.html',
+    }, 'check-forged-notification-subscribe'),
+    { source: protocol.MESSAGE_SOURCES.AGENT }
+  );
+  if (forgedNotificationSubscription.ok) throw new Error('notification.subscribe accepted from agent source');
+
+  const notificationState = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.NOTIFICATION_STATE, {
+      available: true,
+      vapidPublicKey: 'PUBLIC_KEY_123456789',
+      subscriptionCount: 2,
+    }, 'check-notification-state'),
+    { source: protocol.MESSAGE_SOURCES.AGENT }
+  );
+  if (!notificationState.ok) throw new Error(`valid notification state rejected: ${notificationState.error}`);
+
   if (protocol.compareVersions('0.1.1', '0.1.0') <= 0) throw new Error('newer version comparison failed');
   if (protocol.compareVersions('0.1.0-alpha.1', '0.1.0') >= 0) throw new Error('prerelease comparison failed');
   if (protocol.compareVersions('v1.0.0', '1.0.0') !== 0) throw new Error('version normalization failed');
@@ -410,7 +467,7 @@ function checkDependencyLicenses() {
   // policy violations while THIRD_PARTY_NOTICES.md remains the human-readable
   // source of truth for reviewed direct dependencies.
   const lock = JSON.parse(fs.readFileSync(filePath('package-lock.json'), 'utf8'));
-  const allowed = ['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC', '0BSD', 'Unlicense'];
+  const allowed = ['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC', 'MPL-2.0', '0BSD', 'Unlicense'];
   const blocked = ['GPL', 'AGPL', 'SSPL', 'Commons Clause', 'Business Source License'];
 
   for (const [name, meta] of Object.entries(lock.packages || {})) {
@@ -435,6 +492,7 @@ check('proxy config syntax', () => checkNodeSyntax('proxy/config.js'));
 check('proxy FSD proxy syntax', () => checkNodeSyntax('proxy/fsd-proxy.js'));
 check('proxy fsd parser syntax', () => checkNodeSyntax('proxy/fsd-parser.js'));
 check('proxy local web server syntax', () => checkNodeSyntax('proxy/local-web-server.js'));
+check('proxy push notifications syntax', () => checkNodeSyntax('proxy/push-notifications.js'));
 check('proxy ogg-speex syntax', () => checkNodeSyntax('proxy/ogg-speex.js'));
 check('proxy pilot bridge syntax', () => checkNodeSyntax('proxy/pilot-bridge.js'));
 check('proxy pilot core syntax', () => checkNodeSyntax('proxy/pilot-core.js'));
@@ -460,6 +518,8 @@ check('release version check syntax', () => checkNodeSyntax('scripts/check-relea
 check('release version setter syntax', () => checkNodeSyntax('scripts/set-release-version.js'));
 check('local updater syntax', () => checkNodeSyntax('scripts/update-local.js'));
 check('local updater test syntax', () => checkNodeSyntax('scripts/test-local-update.js'));
+check('chat history test syntax', () => checkNodeSyntax('scripts/test-chat-history.js'));
+check('push notification test syntax', () => checkNodeSyntax('scripts/test-push-notifications.js'));
 check('relay database user helper syntax', () => checkNodeSyntax('scripts/relay-db-user.js'));
 check('relay backup syntax', () => checkNodeSyntax('scripts/relay-backup.js'));
 check('relay backup test syntax', () => checkNodeSyntax('scripts/test-relay-backup.js'));
@@ -468,15 +528,14 @@ check('relay db auth syntax', () => checkNodeSyntax('scripts/test-relay-db-auth.
 check('relay db user test syntax', () => checkNodeSyntax('scripts/test-relay-db-user.js'));
 check('relay admin test syntax', () => checkNodeSyntax('scripts/test-relay-admin.js'));
 check('relay account test syntax', () => checkNodeSyntax('scripts/test-relay-account.js'));
-check('directory helper syntax', () => checkNodeSyntax('scripts/directory-server.js'));
-check('directory test syntax', () => checkNodeSyntax('scripts/test-directory.js'));
-check('directory API test syntax', () => checkNodeSyntax('scripts/test-directory-api.js'));
 check('site preview syntax', () => checkNodeSyntax('scripts/preview-site.js'));
 check('relay MFA preflight syntax', () => checkNodeSyntax('scripts/check-admin-mfa-live.js'));
 check('remote preflight syntax', () => checkNodeSyntax('scripts/check-remote-preview.js'));
 check('remote simulation syntax', () => checkNodeSyntax('scripts/test-remote-preview.js'));
 check('remote protocol syntax', () => checkNodeSyntax('packages/protocol/index.js'));
 check('remote protocol rules', checkRemoteProtocol);
+check('chat history behavior', () => runNodeScript('scripts/test-chat-history.js'));
+check('push notification behavior', () => runNodeScript('scripts/test-push-notifications.js'));
 check('relay database migrations', () => runNodeScript('scripts/test-relay-db.js'));
 check('setup configuration generation', () => runNodeScript('scripts/test-setup.js'));
 check('relay database auth', () => runNodeScript('scripts/test-relay-db-auth.js'));
@@ -484,16 +543,14 @@ check('relay database user helper', () => runNodeScript('scripts/test-relay-db-u
 check('relay backup and restore', () => runNodeScript('scripts/test-relay-backup.js'));
 check('relay admin api', () => runNodeScript('scripts/test-relay-admin.js'));
 check('relay account api', () => runNodeScript('scripts/test-relay-account.js'));
-check('public directory registry', () => runNodeScript('scripts/test-directory.js'));
-check('public directory HTTP API', () => runNodeScript('scripts/test-directory-api.js'));
 check('proxy privacy guards', checkProxyPrivacyGuards);
 check('hosted security guards', checkHostedSecurityGuards);
 check('dependency licenses', checkDependencyLicenses);
 check('webapp asset references', checkWebappReferences);
 check('webapp script syntax', () => checkNodeSyntax('webapp/app.js'));
+check('webapp service worker syntax', () => checkNodeSyntax('webapp/sw.js'));
 check('account script syntax', () => checkNodeSyntax('webapp/auth.js'));
 check('public site script syntax', () => checkNodeSyntax('webapp/site.js'));
-check('server directory script syntax', () => checkNodeSyntax('webapp/servers.js'));
 check('relay admin asset references', checkAdminReferences);
 check('relay admin script syntax', () => checkNodeSyntax('apps/relay/admin.js'));
 check('relay admin MFA syntax', () => checkNodeSyntax('apps/relay/admin-mfa.js'));
@@ -512,6 +569,7 @@ check('project license', () => {
 check('config.example.json', () => parseJson('config.example.json'));
 check('release-manifest.json', () => parseJson('release-manifest.json'));
 check('webapp/release.json', () => parseJson('webapp/release.json'));
+check('webapp/manifest.webmanifest', () => parseJson('webapp/manifest.webmanifest'));
 
 if (fs.existsSync(filePath('config.json'))) {
   check('config.json', () => parseJson('config.json'));

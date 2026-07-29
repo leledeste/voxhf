@@ -21,26 +21,24 @@
 
   root * /srv/voxhf-webapp
   route {
-    @directory path /directory/api/*
-    reverse_proxy @directory voxhf-relay:8787
+    @removedDirectory path /servers /servers/ /servers.html /servers.js /directory/api/*
+    respond @removedDirectory 404
 
     @setup path /setup /setup/
     rewrite @setup /setup.html
-    @servers path /servers /servers/
-    rewrite @servers /servers.html
     @privacy path /privacy /privacy/
     rewrite @privacy /privacy.html
     @terms path /terms /terms/
     rewrite @terms /terms.html
 
-    @workspaceFiles path /app.html /app.js /styles.css /weather.js /login.html /auth.js /login /register
+    @workspaceFiles path /app.html /app.js /styles.css /weather.js /login.html /auth.js /manifest.webmanifest /sw.js /login /register
     respond @workspaceFiles 404
 
     try_files {path} /index.html
     file_server
   }
 
-  @html path / /index.html /privacy /privacy/ /privacy.html /terms /terms/ /terms.html /setup /setup/ /setup.html /servers /servers/ /servers.html
+  @html path / /index.html /privacy /privacy/ /privacy.html /terms /terms/ /terms.html /setup /setup/ /setup.html
   header @html Cache-Control "no-store"
 
   @release path /release.json
@@ -81,6 +79,9 @@
 
   @release path /release.json
   header @release Cache-Control "no-store"
+
+  @pwa path /sw.js /manifest.webmanifest
+  header @pwa Cache-Control "no-store"
 
   header {
     X-Content-Type-Options nosniff

@@ -72,6 +72,7 @@ function createRemoteAgent(options) {
       sendRadioState();
       sendStationsState();
       sendWeatherState();
+      sendNotificationState();
     });
 
     next.on('message', (raw, isBinary) => {
@@ -181,6 +182,19 @@ function createRemoteAgent(options) {
         return;
       case MESSAGE_TYPES.CHAT_SEND:
         commands.sendChatCommand(message.payload, (text) => logger.warn(`[REMOTE] ${text}`));
+        return;
+      case MESSAGE_TYPES.CHAT_HISTORY_REQUEST:
+        sendChatHistory();
+        return;
+      case MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE: {
+        const result = options.notifications.addSubscription(message.payload);
+        if (!result.ok) logger.warn(`[PUSH] ${result.error}`);
+        sendNotificationState();
+        return;
+      }
+      case MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE:
+        options.notifications.removeSubscription(message.payload.endpoint);
+        sendNotificationState();
         return;
       case MESSAGE_TYPES.WEATHER_REQUEST:
         commands.sendWeatherRequest(message.payload.kind, message.payload.icao, (text) => logger.warn(`[REMOTE] ${text}`), {
@@ -350,12 +364,44 @@ function createRemoteAgent(options) {
   function sendChatMessage(data) {
     const text = String(data.text || '').trim();
     if (!text) return;
-    send(MESSAGE_TYPES.CHAT_MESSAGE, {
+    const payload = {
       sender: String(data.sender || 'LOCAL'),
       recipient: String(data.recipient || options.state.getCallsign() || 'LOCAL'),
       text,
       timestamp: data.timestamp || options.timestamp(),
       direction: data.direction === 'outgoing' ? 'outgoing' : 'incoming',
+    };
+    if (data.messageId) payload.messageId = String(data.messageId);
+    send(MESSAGE_TYPES.CHAT_MESSAGE, payload);
+  }
+
+  function sendChatHistory() {
+    // History is requested whenever a browser opens, refreshes, or reconnects.
+    // It is intentionally unrelated to Push API support or permission state.
+    const messages = options.state.getMessageLog(50)
+      .map((data) => {
+        const text = String(data.text || '').trim();
+        if (!text) return null;
+        const message = {
+          sender: String(data.sender || 'LOCAL'),
+          recipient: String(data.recipient || options.state.getCallsign() || 'LOCAL'),
+          text,
+          timestamp: data.timestamp || options.timestamp(),
+          direction: data.direction === 'outgoing' ? 'outgoing' : 'incoming',
+        };
+        if (data.messageId) message.messageId = String(data.messageId);
+        return message;
+      })
+      .filter(Boolean);
+    send(MESSAGE_TYPES.CHAT_HISTORY, { messages });
+  }
+
+  function sendNotificationState() {
+    const notificationState = options.notifications.getPublicState();
+    send(MESSAGE_TYPES.NOTIFICATION_STATE, {
+      available: notificationState.available === true,
+      vapidPublicKey: notificationState.vapidPublicKey,
+      subscriptionCount: notificationState.subscriptionCount,
     });
   }
 
@@ -529,6 +575,9 @@ function makeCommandRateLimits() {
   return new Map([
     [MESSAGE_TYPES.RADIO_SET, { max: 8, windowMs: 10_000 }],
     [MESSAGE_TYPES.CHAT_SEND, { max: 8, windowMs: 10_000 }],
+    [MESSAGE_TYPES.CHAT_HISTORY_REQUEST, { max: 6, windowMs: 10_000 }],
+    [MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE, { max: 6, windowMs: 60_000 }],
+    [MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE, { max: 6, windowMs: 60_000 }],
     [MESSAGE_TYPES.WEATHER_REQUEST, { max: 6, windowMs: 10_000 }],
     [MESSAGE_TYPES.ATIS_REQUEST, { max: 6, windowMs: 10_000 }],
     [MESSAGE_TYPES.XPDR_SET_SQUAWK, { max: 6, windowMs: 10_000 }],

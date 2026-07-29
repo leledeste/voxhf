@@ -12,9 +12,9 @@ penetration test or a guarantee that the software is vulnerability-free.
 - Registration invites and the relay admin API.
 - Agent tokens, browser pairing, WebSocket authentication, and user isolation.
 - Remote command and live RX/TX routing.
+- Multi-device session chat recovery and local-agent Web Push delivery.
 - SQLite storage, logging, Docker/Caddy, browser headers, and dependencies.
 - Local-agent command allowlists and privacy guards already covered by CI.
-- Public directory listing administration and authenticated heartbeats.
 
 ## Verified Controls
 
@@ -34,9 +34,6 @@ penetration test or a guarantee that the software is vulnerability-free.
 - Remote TX requires an active selected device and explicit TX state, validates
   binary framing, has a maximum duration, and stops on disconnect.
 - Voice and chat contents are routed live and are not persisted by the relay.
-- Directory heartbeat tokens are random, stored only as hashes, protected by
-  IP and per-listing rate limits, and cannot change a listing's identity or
-  official status.
 - Session IP/user-agent metadata and audit persistence are disabled by default.
 - Production dependencies reported zero known vulnerabilities through
   `npm audit --omit=dev` on the audit date.
@@ -74,8 +71,6 @@ penetration test or a guarantee that the software is vulnerability-free.
   sockets, but routine session-token rotation is not implemented.
 - The hosted app intentionally permits connections to operator-selected HTTPS
   and WSS relay origins; a compromised trusted browser can still act as the user.
-- Directory operator, source, privacy, and availability metadata remain
-  self-declared. A listing or heartbeat is not a security review.
 - The app CSP still permits inline styles because the current UI updates a small
   number of style properties dynamically; scripts remain restricted to self.
 - IVAO/Altitude protocols are observed private interfaces and may change.

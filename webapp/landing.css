@@ -1,6 +1,6 @@
 /* The landing page deliberately alternates calm white space with a small
-   number of full-width dark bands. Shared setup and directory pages keep the
-   neutral rules from site.css. */
+   number of full-width dark bands. The setup page keeps the neutral rules
+   from site.css. */
 body.landing-page {
   --page: #ffffff;
   --paper: #ffffff;

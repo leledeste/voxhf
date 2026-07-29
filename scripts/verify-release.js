@@ -16,7 +16,7 @@ const distDir = path.join(root, 'dist');
 const install = process.argv.includes('--install');
 const manifestFile = path.join(distDir, 'release-artifacts.json');
 const forbiddenNames = new Set(['.env', 'config.json']);
-const forbiddenDirectories = new Set(['.git', '.voxhf-relay', 'backups', 'node_modules', 'updates', 'voice-dumps']);
+const forbiddenDirectories = new Set(['.git', '.voxhf-local', '.voxhf-relay', 'backups', 'node_modules', 'updates', 'voice-dumps']);
 const forbiddenExtensions = new Set(['.db', '.log', '.pcm', '.raw', '.sqlite', '.sqlite3']);
 
 main().catch((err) => {
@@ -44,6 +44,9 @@ async function verifyArtifact(release, artifact, tempRoot) {
   if (!fs.existsSync(archive)) fail(`Missing archive: ${artifact.file}`);
   const actualHash = sha256File(archive);
   if (actualHash !== artifact.sha256) fail(`Checksum mismatch: ${artifact.file}`);
+  if (artifact.id === 'server' || artifact.id === 'full-source') {
+    await verifyExecutableEntry(archive, 'infra/docker/voxhf-server.sh');
+  }
 
   const extractRoot = path.join(tempRoot, artifact.id);
   fs.mkdirSync(extractRoot, { recursive: true });
@@ -77,8 +80,8 @@ function verifyLocal(packageRoot) {
   ]);
   verifyLockMatchesPackage(packageRoot);
   const pkg = readJson(path.join(packageRoot, 'package.json'));
-  if (JSON.stringify(Object.keys(pkg.dependencies || {})) !== JSON.stringify(['ws'])) {
-    fail('Local Slim must depend only on ws');
+  if (JSON.stringify(Object.keys(pkg.dependencies || {})) !== JSON.stringify(['web-push', 'ws'])) {
+    fail('Local Slim must depend only on web-push and ws');
   }
   for (const forbidden of ['apps', 'infra', 'apps/relay', 'infra/docker']) {
     if (fs.existsSync(path.join(packageRoot, forbidden))) fail(`Local Slim contains server path: ${forbidden}`);
@@ -86,7 +89,7 @@ function verifyLocal(packageRoot) {
   checkNodeSyntax(path.join(packageRoot, 'proxy.js'));
   if (install) {
     runNpm(packageRoot, ['ci', '--omit=dev']);
-    runNode(packageRoot, ['-e', "require('ws'); require('./packages/protocol')"]);
+    runNode(packageRoot, ['-e', "require('web-push'); require('ws'); require('./packages/protocol')"]);
   }
 }
 
@@ -169,6 +172,32 @@ function verifyChecksumsFile(release) {
   const expected = `${release.artifacts.map((artifact) => `${artifact.sha256}  ${artifact.file}`).join('\n')}\n`;
   const actual = fs.readFileSync(path.join(distDir, 'SHA256SUMS.txt'), 'utf8').replace(/\r\n/g, '\n');
   if (actual !== expected) fail('SHA256SUMS.txt does not match release-artifacts.json');
+}
+
+function verifyExecutableEntry(zipPath, relativePath) {
+  return new Promise((resolve, reject) => {
+    let found = false;
+    yauzl.open(zipPath, { lazyEntries: true }, (openError, zip) => {
+      if (openError) return reject(openError);
+      zip.on('error', reject);
+      zip.on('entry', (entry) => {
+        const name = entry.fileName.replace(/\\/g, '/');
+        if (name.endsWith(`/${relativePath}`)) {
+          found = true;
+          const mode = (entry.externalFileAttributes >>> 16) & 0o777;
+          if (mode !== 0o755) {
+            return reject(new Error(`ZIP entry must be executable (755): ${name}`));
+          }
+        }
+        zip.readEntry();
+      });
+      zip.on('end', () => {
+        if (!found) return reject(new Error(`ZIP executable entry is missing: ${relativePath}`));
+        resolve();
+      });
+      zip.readEntry();
+    });
+  });
 }
 
 function extractZip(zipPath, targetRoot) {

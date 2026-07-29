@@ -16,6 +16,7 @@ function createAppState(options) {
   const currentXpdrState = { squawk: '', mode: '' };
   const knownStations = new Map();
 
+  let messageSequence = 0;
   let callsign = null;
   let connected = false;
   let flightPlanStatus = 'missing';
@@ -27,8 +28,15 @@ function createAppState(options) {
     // Recording chat history here keeps reconnect snapshots consistent no
     // matter whether a message came from FSD, local UI, or remote control.
     if (data.kind === 'message') {
-      messageLog.push(data);
+      const message = {
+        ...data,
+        messageId: data.messageId
+          || `local-${Date.now().toString(36)}-${(++messageSequence).toString(36)}`,
+      };
+      messageLog.push(message);
       if (messageLog.length > 200) messageLog.shift();
+      publish(message);
+      return;
     }
     publish(data);
   }
@@ -256,8 +264,13 @@ function createAppState(options) {
       weatherState: getWeatherState(),
       stations: Array.from(knownStations.values()),
       ownPosition,
-      log: messageLog.slice(-100),
+      log: getMessageLog(),
     };
+  }
+
+  function getMessageLog(limit = 100) {
+    const count = Math.max(1, Math.min(200, Number(limit) || 100));
+    return messageLog.slice(-count).map((message) => ({ ...message }));
   }
 
   return {
@@ -270,6 +283,7 @@ function createAppState(options) {
     getStatus,
     getRadioState,
     getStationsState,
+    getMessageLog,
     getInitState,
     setConnected,
     setCallsign,
