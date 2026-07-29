@@ -8,8 +8,8 @@ Dependency rules for future additions are documented in
 
 ## Runtime Dependencies
 
-Current npm runtime dependencies are intentionally small and use permissive
-licenses.
+Current npm runtime dependencies are intentionally small and use reviewed
+open-source licenses.
 
 ### SimpleWebAuthn
 
@@ -28,6 +28,18 @@ licenses.
 - Purpose: WebSocket server/client support for local and remote connections.
 - License: MIT
 - Installed through npm from <https://www.npmjs.com/package/ws>.
+
+### web-push
+
+- Package: `web-push`
+- Version: 3.6.7
+- Purpose: VAPID key generation, request signing, and delivery to browser Push
+  API endpoints from the local VoxHF proxy.
+- License: Mozilla Public License 2.0.
+- Review decision: accepted as an unmodified, separately installed npm module.
+  VoxHF does not copy or modify its source files; its license remains included
+  in the installed package.
+- Source: <https://github.com/web-push-libs/web-push>
 
 ### better-sqlite3
 

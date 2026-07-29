@@ -5,8 +5,6 @@ const ACCOUNT_STORAGE_KEY = 'voxhf.accountSettings.v1';
 const AUTH_MANUAL_STORAGE_KEY = 'voxhf.authManualMode.v1';
 const UPDATE_NOTICE_STORAGE_KEY = 'voxhf.dismissedUpdate.v1';
 const THEME_STORAGE_KEY = 'voxhf.theme.v1';
-const PAGE_PARAMS = new URLSearchParams(location.search);
-const DEMO_MODE = PAGE_PARAMS.get('demo') === '1';
 const DEFAULT_XPDR_STATE = { squawk: '7000', mode: 'stby' };
 const MAX_VISIBLE_STATION_DISTANCE_NM = 1200;
 const WEATHER_REQUEST_TIMEOUT_MS = 20000;
@@ -29,6 +27,11 @@ const REMOTE_MESSAGE_TYPES = {
   WEATHER_STATE: 'weather.state',
   CHAT_SEND: 'chat.send',
   CHAT_MESSAGE: 'chat.message',
+  CHAT_HISTORY_REQUEST: 'chat.history.request',
+  CHAT_HISTORY: 'chat.history',
+  NOTIFICATION_SUBSCRIBE: 'notification.subscribe',
+  NOTIFICATION_UNSUBSCRIBE: 'notification.unsubscribe',
+  NOTIFICATION_STATE: 'notification.state',
   WEATHER_REQUEST: 'weather.request',
   ATIS_REQUEST: 'atis.request',
   XPDR_SET_SQUAWK: 'xpdr.setSquawk',
@@ -44,8 +47,6 @@ function loadThemePreference() {
   // Theme preference is browser-local so hosted and local sessions can use
   // different appearances without involving the relay or proxy.
   try {
-    const requested = PAGE_PARAMS.get('theme');
-    if (DEMO_MODE && (requested === 'light' || requested === 'dark')) return requested;
     const saved = localStorage.getItem(THEME_STORAGE_KEY);
     if (saved === 'light' || saved === 'dark') return saved;
   } catch (_) {}
@@ -903,6 +904,17 @@ const state = {
     destination: { icao: '', metar: null, taf: null },
   },
   messages: [],
+  notifications: {
+    available: false,
+    vapidPublicKey: '',
+    subscriptionCount: 0,
+    registration: null,
+    subscribed: false,
+    busy: false,
+    syncing: false,
+    status: 'Waiting for proxy',
+    lastSyncSignature: '',
+  },
   weatherExpanded: new Set(),
   weatherPending: new Map(),
   filter: 'all',
@@ -932,6 +944,7 @@ const state = {
   commandQueryText: '',
   transientSeq: 0,
   activeSettingsTab: 'audio',
+  settingsScrollY: 0,
   squawk: storedXpdrState.squawk,
   xpdrMode: storedXpdrState.mode,
   identTimer: null,
@@ -1006,6 +1019,7 @@ function connectLocal(force = false) {
     state.connectStartedAt = 0;
     state.lastPongAt = Date.now();
     state.pongPendingSince = 0;
+    state.notifications.lastSyncSignature = '';
     send({ action: 'ping', at: state.lastPongAt });
   };
 
@@ -1052,6 +1066,7 @@ function connectRemote(force = false) {
     state.lastPongAt = Date.now();
     state.pongPendingSince = 0;
     state.remoteSelectedOnCurrentSocket = '';
+    state.notifications.lastSyncSignature = '';
     setRemoteRelayOnline();
     setRemoteCheck('Relay connected');
     sendRemoteMessage(REMOTE_MESSAGE_TYPES.DEVICE_LIST);
@@ -1262,6 +1277,16 @@ function sendRemoteAction(action) {
     return false;
   }
 
+  if (action.action === 'notification_subscribe') {
+    return sendRemoteMessage(REMOTE_MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE, action.subscription);
+  }
+
+  if (action.action === 'notification_unsubscribe') {
+    return sendRemoteMessage(REMOTE_MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE, {
+      endpoint: action.endpoint,
+    });
+  }
+
   if (action.action === 'sim_com1' || action.action === 'sim_com2') {
     return sendRemoteMessage(REMOTE_MESSAGE_TYPES.RADIO_SET, {
       com: action.action === 'sim_com2' ? 2 : 1,
@@ -1430,6 +1455,7 @@ function handleMessage(data) {
       restoreXpdrState(data.xpdrState);
       setFlightPlanStatus(data.flightPlanStatus || 'missing', data.flightPlan, data.weatherState);
       if (data.remotePairing) applyLocalRemotePairing(data.remotePairing, false);
+      if (data.notifications) applyNotificationState(data.notifications);
       if (data.callsign) state.callsign = data.callsign;
       if (Array.isArray(data.log)) data.log.forEach(addMessage);
       if (data.connected) setOnline(data.callsign);
@@ -1480,6 +1506,9 @@ function handleMessage(data) {
     case 'remote_pairing':
       applyLocalRemotePairing(data, true);
       addLocal(`Remote pairing code: ${data.code}`);
+      break;
+    case 'notification_state':
+      applyNotificationState(data);
       break;
     case 'voice':
       pulseRx();
@@ -1549,6 +1578,16 @@ function handleRemoteRelayMessage(data) {
     case REMOTE_MESSAGE_TYPES.CHAT_MESSAGE:
       markRemoteUpdate();
       addRemoteChatMessage(data.payload || {});
+      return;
+    case REMOTE_MESSAGE_TYPES.CHAT_HISTORY:
+      markRemoteUpdate();
+      if (Array.isArray(data.payload?.messages)) {
+        data.payload.messages.forEach(addRemoteChatMessage);
+      }
+      return;
+    case REMOTE_MESSAGE_TYPES.NOTIFICATION_STATE:
+      markRemoteUpdate();
+      applyNotificationState(data.payload || {});
       return;
     case REMOTE_MESSAGE_TYPES.RELAY_ERROR:
       setRemoteCheck(data.payload?.message || 'Remote relay error.');
@@ -1668,6 +1707,9 @@ function selectRemoteDevice(deviceId, options = {}) {
   if (options.force || changed || state.remoteSelectedOnCurrentSocket !== deviceId) {
     if (sendRemoteMessage(REMOTE_MESSAGE_TYPES.DEVICE_SELECT, { deviceId })) {
       state.remoteSelectedOnCurrentSocket = deviceId;
+      // Chat recovery is a core reconnect action. It must happen regardless
+      // of notification support, permission, or subscription state.
+      sendRemoteMessage(REMOTE_MESSAGE_TYPES.CHAT_HISTORY_REQUEST);
     }
   }
   const device = state.remoteDevices.get(deviceId);
@@ -1728,6 +1770,7 @@ function addRemoteChatMessage(payload) {
     text: payload.text || '',
     direction: payload.direction === 'outgoing' ? 'outgoing' : 'incoming',
     timestamp: payload.timestamp || new Date().toISOString(),
+    messageId: payload.messageId || '',
   });
 }
 
@@ -1826,9 +1869,9 @@ function setFlightPlanStatus(status, flightPlan = null, weatherState = null) {
   const filed = state.flightPlanStatus === 'filed';
   $('flight-plan-dot').classList.toggle('online', filed);
   const route = state.flightPlan.departure && state.flightPlan.destination
-    ? ` ${state.flightPlan.departure}-${state.flightPlan.destination}`
+    ? `${state.flightPlan.departure}-${state.flightPlan.destination}`
     : '';
-  $('flight-plan-text').textContent = filed ? `Flight plan${route}` : 'No flight plan';
+  $('flight-plan-text').textContent = filed ? (route || 'Filed') : 'No flight plan';
   renderWeatherPanel();
   updateSettingsView();
 }
@@ -1915,12 +1958,26 @@ function openSettings(tab = state.activeSettingsTab) {
   renderSettingsTab();
   syncRemoteSettingsInputs(true);
   updateSettingsView();
-  $('settings-modal').classList.remove('hidden');
+  const modal = $('settings-modal');
+  if (modal.classList.contains('hidden')) {
+    // Lock the document at its current position while the dialog is open.
+    // This also stops short, non-scrollable Settings pages from passing an
+    // iOS swipe through to the workspace behind the modal.
+    state.settingsScrollY = window.scrollY;
+    document.body.style.top = `-${state.settingsScrollY}px`;
+    document.body.classList.add('settings-open');
+    modal.classList.remove('hidden');
+  }
   if (state.activeSettingsTab === 'remote') refreshAccountStatus();
 }
 
 function closeSettings() {
-  $('settings-modal').classList.add('hidden');
+  const modal = $('settings-modal');
+  if (modal.classList.contains('hidden')) return;
+  modal.classList.add('hidden');
+  document.body.classList.remove('settings-open');
+  document.body.style.removeProperty('top');
+  window.scrollTo(0, state.settingsScrollY);
 }
 
 function renderSettingsTab() {
@@ -2126,6 +2183,249 @@ function updateSettingsView() {
   renewButton.title = state.remote.enabled
     ? 'Pairing codes are generated by the local VoxHF webapp on the Altitude PC.'
     : 'Ask the connected local agent for a fresh short-lived browser pairing code.';
+  updateNotificationSettings();
+}
+
+function pushNotificationsSupported() {
+  return window.isSecureContext
+    && 'serviceWorker' in navigator
+    && 'PushManager' in window
+    && 'Notification' in window;
+}
+
+function notificationPermission() {
+  return 'Notification' in window ? Notification.permission : 'unsupported';
+}
+
+function updateNotificationSettings() {
+  const supported = pushNotificationsSupported();
+  const permission = notificationPermission();
+  const notifications = state.notifications;
+  const appleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches
+    || navigator.standalone === true;
+  const supportText = !supported
+    ? (window.isSecureContext ? 'Not supported' : 'HTTPS required')
+    : appleMobile && !standalone
+      ? 'Add to Home Screen first'
+      : 'Supported';
+  const deviceEligible = supported && (!appleMobile || standalone);
+  const proxyText = notifications.available
+    ? 'Ready'
+    : state.ws?.readyState === WebSocket.OPEN
+      ? 'Waiting for proxy'
+      : 'Offline';
+
+  setText('settings-notification-support', supportText);
+  setText('settings-notification-permission', permission === 'default' ? 'Not requested' : permission);
+  setText('settings-notification-device', notifications.subscribed ? 'Enabled' : 'Disabled');
+  setText('settings-notification-proxy', proxyText);
+  setText('settings-notification-count', String(notifications.subscriptionCount || 0));
+  setText('settings-notification-status', notifications.status);
+  setSettingTone('settings-notification-device', notifications.subscribed ? 'good' : '');
+  setSettingTone('settings-notification-proxy', notifications.available ? 'good' : 'warning');
+  setSettingTone('settings-notification-support', deviceEligible ? 'good' : 'warning');
+
+  const enable = $('settings-notifications-enable');
+  const disable = $('settings-notifications-disable');
+  if (enable) {
+    enable.disabled = notifications.busy
+      || !deviceEligible
+      || permission === 'denied'
+      || !notifications.available
+      || notifications.subscribed;
+  }
+  if (disable) disable.disabled = notifications.busy || !supported || !notifications.subscribed;
+}
+
+function applyNotificationState(payload) {
+  const nextKey = String(payload.vapidPublicKey || '');
+  if (state.notifications.vapidPublicKey !== nextKey) {
+    state.notifications.lastSyncSignature = '';
+  }
+  state.notifications.available = payload.available === true;
+  state.notifications.vapidPublicKey = nextKey;
+  state.notifications.subscriptionCount = Number(payload.subscriptionCount) || 0;
+  if (!state.notifications.status || state.notifications.status === 'Waiting for proxy') {
+    state.notifications.status = 'Enable notifications separately on every device.';
+  }
+  updateNotificationSettings();
+  syncExistingNotificationSubscription().catch(() => {});
+}
+
+async function ensureNotificationWorker() {
+  if (!pushNotificationsSupported()) throw new Error('Web Push is not available on this page.');
+  if (!state.notifications.registration) {
+    state.notifications.registration = await navigator.serviceWorker.register('sw.js', { scope: './' });
+  }
+  return state.notifications.registration;
+}
+
+async function refreshNotificationSubscriptionState() {
+  if (!pushNotificationsSupported()) {
+    state.notifications.subscribed = false;
+    updateNotificationSettings();
+    return null;
+  }
+  try {
+    const registration = await ensureNotificationWorker();
+    const subscription = await registration.pushManager.getSubscription();
+    state.notifications.subscribed = Boolean(subscription);
+    updateNotificationSettings();
+    return subscription;
+  } catch (err) {
+    state.notifications.status = err.message || 'Could not initialize notifications.';
+    state.notifications.subscribed = false;
+    updateNotificationSettings();
+    return null;
+  }
+}
+
+async function syncExistingNotificationSubscription() {
+  // This only re-sends an already-authorized browser subscription. It never
+  // asks for permission and is separate from chat-history recovery.
+  if (
+    state.notifications.syncing
+    || !state.notifications.available
+    || !state.notifications.vapidPublicKey
+    || notificationPermission() !== 'granted'
+  ) return;
+
+  state.notifications.syncing = true;
+  try {
+    const subscription = await refreshNotificationSubscriptionState();
+    if (!subscription) return;
+    if (!subscriptionUsesVapidKey(subscription, state.notifications.vapidPublicKey)) {
+      state.notifications.status = 'The proxy notification key changed. Disable and enable notifications again.';
+      updateNotificationSettings();
+      return;
+    }
+    const payload = notificationSubscriptionPayload(subscription);
+    const signature = [
+      payload.endpoint,
+      state.notifications.vapidPublicKey,
+      state.remote.enabled ? state.remoteSelectedDeviceId : 'local',
+      state.generation,
+    ].join('|');
+    if (state.notifications.lastSyncSignature === signature) return;
+    if (send({ action: 'notification_subscribe', subscription: payload })) {
+      state.notifications.lastSyncSignature = signature;
+      state.notifications.status = 'Notifications enabled on this device.';
+      updateNotificationSettings();
+    }
+  } finally {
+    state.notifications.syncing = false;
+  }
+}
+
+async function enableNotifications() {
+  state.notifications.busy = true;
+  state.notifications.status = 'Enabling notifications…';
+  updateNotificationSettings();
+  try {
+    if (!state.notifications.available || !state.notifications.vapidPublicKey) {
+      throw new Error('The local proxy is not ready for notifications.');
+    }
+    let permission = notificationPermission();
+    if (permission === 'default') permission = await Notification.requestPermission();
+    if (permission !== 'granted') throw new Error('Notification permission was not granted.');
+
+    const registration = await ensureNotificationWorker();
+    let subscription = await registration.pushManager.getSubscription();
+    if (subscription && !subscriptionUsesVapidKey(subscription, state.notifications.vapidPublicKey)) {
+      await subscription.unsubscribe();
+      subscription = null;
+    }
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(state.notifications.vapidPublicKey),
+      });
+    }
+
+    const payload = notificationSubscriptionPayload(subscription);
+    if (!send({ action: 'notification_subscribe', subscription: payload })) {
+      throw new Error('The proxy is offline. Reconnect it and try again.');
+    }
+    state.notifications.subscribed = true;
+    state.notifications.lastSyncSignature = [
+      payload.endpoint,
+      state.notifications.vapidPublicKey,
+      state.remote.enabled ? state.remoteSelectedDeviceId : 'local',
+      state.generation,
+    ].join('|');
+    state.notifications.status = 'Notifications enabled on this device.';
+  } catch (err) {
+    state.notifications.status = err.message || 'Could not enable notifications.';
+    await refreshNotificationSubscriptionState();
+  } finally {
+    state.notifications.busy = false;
+    updateNotificationSettings();
+  }
+}
+
+async function disableNotifications() {
+  state.notifications.busy = true;
+  state.notifications.status = 'Disabling notifications…';
+  updateNotificationSettings();
+  try {
+    const registration = await ensureNotificationWorker();
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      state.notifications.subscribed = false;
+      state.notifications.status = 'Notifications are already disabled on this device.';
+      return;
+    }
+    if (!send({ action: 'notification_unsubscribe', endpoint: subscription.endpoint })) {
+      throw new Error('The proxy is offline. Reconnect it before disabling notifications.');
+    }
+    await subscription.unsubscribe();
+    state.notifications.subscribed = false;
+    state.notifications.lastSyncSignature = '';
+    state.notifications.status = 'Notifications disabled on this device.';
+  } catch (err) {
+    state.notifications.status = err.message || 'Could not disable notifications.';
+  } finally {
+    state.notifications.busy = false;
+    updateNotificationSettings();
+  }
+}
+
+function notificationSubscriptionPayload(subscription) {
+  const json = subscription.toJSON();
+  const appUrl = new URL('app.html', location.href);
+  appUrl.search = '';
+  appUrl.hash = '';
+  return {
+    endpoint: json.endpoint,
+    p256dh: json.keys?.p256dh || '',
+    auth: json.keys?.auth || '',
+    deviceId: state.remoteBrowserId,
+    deviceName: notificationDeviceName(),
+    appUrl: appUrl.toString(),
+  };
+}
+
+function notificationDeviceName() {
+  const platform = navigator.userAgentData?.platform || navigator.platform || 'Browser';
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+  return `${platform}${standalone ? ' Home Screen' : ''}`.slice(0, 80);
+}
+
+function subscriptionUsesVapidKey(subscription, publicKey) {
+  const current = subscription.options?.applicationServerKey;
+  if (!current) return true;
+  const expected = urlBase64ToUint8Array(publicKey);
+  const actual = new Uint8Array(current);
+  return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
+}
+
+function urlBase64ToUint8Array(value) {
+  const padding = '='.repeat((4 - value.length % 4) % 4);
+  const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from(raw, character => character.charCodeAt(0));
 }
 
 // RX audio: the proxy decodes Speex into mono 16-bit PCM and this queues it.
@@ -2986,6 +3286,7 @@ function addMessage(msg) {
   // key so a conversation can be rendered as one tab regardless of direction.
   if (!msg || msg.kind !== 'message') return;
   if (!msg.messageId) msg.messageId = `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  if (state.messages.some((item) => item.messageId === msg.messageId)) return;
   const peer = privatePeerForMessage(msg);
   if (peer) {
     msg.privatePeer = peer;
@@ -3152,7 +3453,8 @@ function setActiveChatFilter(filter, peer = '') {
 
 function renderPrivateTabs() {
   // Private tabs are derived from known peers, not stored as DOM state.
-  // Closing a tab removes the related conversation from memory.
+  // Closing a tab hides only that shortcut; chat history remains available
+  // in All and Private for the lifetime of the proxy session.
   const tabs = document.querySelector('.tabs');
   const systemTab = tabs.querySelector('[data-filter="system"]');
   tabs.querySelectorAll('.private-peer-tab').forEach(tab => tab.remove());
@@ -3215,10 +3517,10 @@ function messageMatchesCurrentTab(msg) {
 }
 
 function closePrivateChat(peer) {
-  // Closing a private chat is definitive for the in-memory session.
+  // The X closes only the conversation tab. Messages must stay in the common
+  // history so closing a shortcut cannot erase All or Private.
   const callsign = normalizeCallsign(peer);
   if (!callsign) return;
-  state.messages = state.messages.filter(msg => !(msg.type === 'private' && privatePeerForMessage(msg) === callsign));
   state.privatePeers.delete(callsign);
   if (state.filter === 'private-peer' && state.privatePeer === callsign) {
     state.filter = 'private';
@@ -3472,6 +3774,8 @@ function bindUi() {
     await ensureAudio();
     send({ action: 'test_audio' });
   };
+  $('settings-notifications-enable').onclick = enableNotifications;
+  $('settings-notifications-disable').onclick = disableNotifications;
   $('settings-remote-apply').onclick = applyRemoteSettings;
   $('settings-remote-check-button').onclick = runRemotePreflight;
   $('settings-remote-renew-code').onclick = renewRemotePairingCode;
@@ -3514,14 +3818,30 @@ function bindUi() {
 function bindAudioUnlock() {
   if (state.audioUnlockBound) return;
   state.audioUnlockBound = true;
-  const unlock = () => {
-    // Mobile browsers require a user gesture before audio can play. Creating
-    // and resuming the RX context on the first real interaction keeps later
-    // live radio PCM from arriving into a suspended output graph.
-    ensureAudio().catch(() => {});
+  const gestureEvent = window.PointerEvent ? 'pointerdown' : 'touchstart';
+  let unlockPending = false;
+
+  const removeUnlockListeners = () => {
+    document.removeEventListener(gestureEvent, unlock);
+    document.removeEventListener('keydown', unlock);
   };
-  document.addEventListener('pointerdown', unlock, { passive: true });
-  document.addEventListener('touchstart', unlock, { passive: true });
+
+  const unlock = async () => {
+    // Mobile browsers require a user gesture before audio can play. Stop
+    // listening after the first successful resume so later iOS taps do not
+    // update Settings between pointerdown and click.
+    if (unlockPending) return;
+    unlockPending = true;
+    try {
+      const ctx = await ensureAudio();
+      if (ctx.state === 'running') removeUnlockListeners();
+    } catch (_) {
+      // Keep the listeners installed so a later gesture can retry.
+    } finally {
+      unlockPending = false;
+    }
+  };
+  document.addEventListener(gestureEvent, unlock, { passive: true });
   document.addEventListener('keydown', unlock);
 }
 
@@ -3622,91 +3942,15 @@ async function resumeFromStandby() {
   else heartbeat();
 }
 
-function initializeDemoState() {
-  // Demo mode is a deterministic, credential-free rendering fixture used for
-  // documentation screenshots. It never opens a network or audio connection.
-  document.body.dataset.demo = '1';
-  const demoPanel = PAGE_PARAMS.get('panel');
-  const demoPanels = new Set(['hero', 'overview', 'controls', 'voice', 'communications', 'weather']);
-  if (demoPanels.has(demoPanel)) {
-    document.body.classList.add(`demo-panel-${demoPanel}`);
-  }
-  state.remote.enabled = PAGE_PARAMS.get('mode') === 'remote';
-  state.remote.relay = state.remote.enabled ? 'wss://relay.example.test' : '';
-  state.version = '0.1.0';
-  state.lanIp = '192.0.2.10';
-  state.callsign = 'VOX321';
-  state.squawk = '2000';
-  state.xpdrMode = 'alt';
-  $('xpdr-code').value = state.squawk;
-  renderXpdrMode();
-
-  updateOwnPosition({ lat: 45.6301, lon: 8.7231 }, false);
-  [
-    { callsign: 'LIMC_TWR', freq: '128.350', lat: 45.6306, lon: 8.7281 },
-    { callsign: 'LIMC_APP', freq: '126.750', lat: 45.6201, lon: 8.7021 },
-    { callsign: 'LIML_TWR', freq: '118.100', lat: 45.4451, lon: 9.2767 },
-    { callsign: 'LIPP_CTR', freq: '120.725', lat: 45.0522, lon: 10.0712 },
-  ].forEach(station => addStation(station, false));
-  setComLabel(1, '128.350', 'LIMC_TWR');
-  setComLabel(2, '122.800', 'UNICOM');
-
-  const weatherState = {
-    departure: {
-      icao: 'LIMC',
-      metar: { text: 'LIMC 131350Z 18008KT 9999 FEW035 28/17 Q1016 NOSIG', source: 'IVAO', receivedAt: '2026-07-13T13:52:00Z' },
-      taf: { text: 'TAF LIMC 131100Z 1312/1418 17008KT CAVOK TEMPO 1315/1319 4000 TSRA SCT030CB', source: 'IVAO', receivedAt: '2026-07-13T13:52:00Z' },
-    },
-    destination: {
-      icao: 'LIRF',
-      metar: { text: 'LIRF 131350Z 24012KT 9999 FEW025 30/19 Q1013 NOSIG', source: 'IVAO', receivedAt: '2026-07-13T13:52:00Z' },
-      taf: { text: 'TAF LIRF 131100Z 1312/1418 23010KT CAVOK BECMG 1406/1408 17006KT', source: 'IVAO', receivedAt: '2026-07-13T13:52:00Z' },
-    },
-  };
-  if (demoPanel === 'weather' || PAGE_PARAMS.get('weather') === 'expanded') {
-    state.weatherExpanded.add('weather-departure-metar');
-    state.weatherExpanded.add('weather-destination-metar');
-  }
-  setFlightPlanStatus('filed', { departure: 'LIMC', destination: 'LIRF', alternate: 'LIPZ' }, weatherState);
-
-  state.messages = [
-    { kind: 'message', type: 'frequency', sender: 'LIMC_TWR', text: 'VOX321, wind 180 degrees 8 knots, runway 35R cleared for takeoff.', direction: 'incoming', timestamp: '2026-07-13T14:29:00Z', messageId: 'demo-1' },
-    { kind: 'message', type: 'frequency', sender: 'VOX321', recipient: '@28350', text: 'Cleared for takeoff runway 35R, VOX321.', direction: 'outgoing', timestamp: '2026-07-13T14:29:30Z', messageId: 'demo-2' },
-    { kind: 'message', type: 'frequency', sender: 'LIMC_TWR', text: 'VOX321, contact Milano Departure on 126.750.', direction: 'incoming', timestamp: '2026-07-13T14:32:00Z', messageId: 'demo-3' },
-    { kind: 'message', type: 'frequency', sender: 'VOX321', recipient: '@28350', text: '126.750, VOX321, good day.', direction: 'outgoing', timestamp: '2026-07-13T14:32:30Z', messageId: 'demo-4' },
-    { kind: 'message', type: 'frequency', sender: 'LIMC_APP', text: 'VOX321, identified. Climb flight level 120, direct TZO.', direction: 'incoming', timestamp: '2026-07-13T14:34:00Z', messageId: 'demo-5' },
-    { kind: 'message', type: 'frequency', sender: 'VOX321', recipient: '@26750', text: 'Climb flight level 120, direct TZO, VOX321.', direction: 'outgoing', timestamp: '2026-07-13T14:34:30Z', messageId: 'demo-6' },
-    { kind: 'message', type: 'private', sender: 'LIMC_GND', recipient: 'VOX321', text: 'Your flight plan LIMC-LIRF is active.', direction: 'incoming', timestamp: '2026-07-13T14:35:00Z', messageId: 'demo-7', privatePeer: 'LIMC_GND' },
-    { kind: 'message', type: 'system', sender: 'SYSTEM', text: 'Voice channel LIMC_APP is ready.', direction: 'incoming', timestamp: '2026-07-13T14:35:30Z', messageId: 'demo-8' },
-  ];
-  state.privatePeers.set('LIMC_GND', { unread: 1 });
-  renderPrivateTabs();
-  renderMessages();
-  setWebTxStatus(true, true);
-  setOnline(state.callsign);
-  setControlsDisabled(false);
-  $('remote-pill').classList.toggle('hidden', !state.remote.enabled);
-  $('remote-mode').textContent = state.remote.enabled ? 'Remote' : 'Local';
-  if (PAGE_PARAMS.get('rx') !== '0') $('rx-light').classList.add('active');
-  if (demoPanel === 'voice') setTxUi(true, 1);
-  if (demoPanel === 'communications') {
-    $('message-input').value = '.';
-    updateCommandMenu();
-  }
-  updateSettingsView();
-}
-
 // Standby/suspended tab: when the page becomes visible, check the control
 // channel and audio context without immediately discarding a working socket.
-if (!DEMO_MODE) {
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) resumeFromStandby();
-  });
-  window.addEventListener('focus', resumeFromStandby);
-  window.addEventListener('pageshow', resumeFromStandby);
-  window.addEventListener('online', resumeFromStandby);
-  setInterval(heartbeat, HEARTBEAT_MS);
-}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) resumeFromStandby();
+});
+window.addEventListener('focus', resumeFromStandby);
+window.addEventListener('pageshow', resumeFromStandby);
+window.addEventListener('online', resumeFromStandby);
+setInterval(heartbeat, HEARTBEAT_MS);
 
 applyTheme(activeTheme);
 bindUi();
@@ -3717,12 +3961,9 @@ renderSettingsTab();
 updateSettingsView();
 renderWeatherPanel();
 renderMessages();
-if (DEMO_MODE) {
-  initializeDemoState();
-} else {
-  checkForUpdates('release.json');
-  refreshAccountStatus().finally(() => {
-    updateAuthGate();
-    connect();
-  });
-}
+refreshNotificationSubscriptionState();
+checkForUpdates('release.json');
+refreshAccountStatus().finally(() => {
+  updateAuthGate();
+  connect();
+});

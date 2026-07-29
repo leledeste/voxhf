@@ -25,12 +25,6 @@ Optional persistence is disabled by default:
 - `VOXHF_RELAY_PERSIST_AUDIT=true` stores bounded admin, agent, and pairing
   audit events without message or audio payloads.
 
-An operator who opts into the public server directory also stores and
-publishes the server name, operator, region, access policy, app/relay URLs,
-description, privacy/source links, declared version, registration status, and
-last heartbeat time. The heartbeat token is stored as a hash. Heartbeats do
-not include users, account data, messages, radio state, audio, or IVAO traffic.
-
 ## Data The Relay Should Not Store
 
 - IVAO credentials.
@@ -42,6 +36,19 @@ not include users, account data, messages, radio state, audio, or IVAO traffic.
 - Full message contents.
 - Full authentication tokens.
 - Pairing and registration invite codes after use or expiry.
+- Browser push endpoints or push encryption keys. These pass through the relay
+  only as live authenticated commands to the selected local agent.
+
+## Data Kept By The Local Agent
+
+- Up to 200 recent typed chat events in memory for the current proxy session,
+  so a browser refresh or reconnect can recover the conversation.
+- Web Push VAPID credentials and enabled-device subscriptions in
+  `.voxhf-local/notifications.json`.
+
+Chat history is cleared when the local proxy stops. Notification state remains
+local to the simulator PC until a device is disabled or the private local state
+file is removed.
 
 ## Retention Targets
 
@@ -74,11 +81,6 @@ Remote mode should eventually provide:
 When someone self-hosts a relay, they become responsible for their own deployment, logs, backups, users, and privacy obligations.
 
 The project should provide safe defaults, but operators still need to configure hosting, backups, access control, and retention responsibly.
-
-A public directory listing is not a VoxHF audit or endorsement. Independent
-operators may modify the software and their data practices cannot be verified
-by the directory. Users must review the operator's privacy and source links
-before registering.
 
 ## Official Relay Responsibility
 

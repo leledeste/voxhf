@@ -35,6 +35,11 @@ const MESSAGE_TYPES = Object.freeze({
   WEATHER_STATE: 'weather.state',
   CHAT_SEND: 'chat.send',
   CHAT_MESSAGE: 'chat.message',
+  CHAT_HISTORY_REQUEST: 'chat.history.request',
+  CHAT_HISTORY: 'chat.history',
+  NOTIFICATION_SUBSCRIBE: 'notification.subscribe',
+  NOTIFICATION_UNSUBSCRIBE: 'notification.unsubscribe',
+  NOTIFICATION_STATE: 'notification.state',
   WEATHER_REQUEST: 'weather.request',
   ATIS_REQUEST: 'atis.request',
   XPDR_SET_SQUAWK: 'xpdr.setSquawk',
@@ -67,6 +72,11 @@ const SOURCE_RULES = Object.freeze({
   [MESSAGE_TYPES.WEATHER_STATE]: [MESSAGE_SOURCES.AGENT],
   [MESSAGE_TYPES.CHAT_SEND]: [MESSAGE_SOURCES.BROWSER],
   [MESSAGE_TYPES.CHAT_MESSAGE]: [MESSAGE_SOURCES.AGENT],
+  [MESSAGE_TYPES.CHAT_HISTORY_REQUEST]: [MESSAGE_SOURCES.BROWSER],
+  [MESSAGE_TYPES.CHAT_HISTORY]: [MESSAGE_SOURCES.AGENT],
+  [MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE]: [MESSAGE_SOURCES.BROWSER],
+  [MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE]: [MESSAGE_SOURCES.BROWSER],
+  [MESSAGE_TYPES.NOTIFICATION_STATE]: [MESSAGE_SOURCES.AGENT],
   [MESSAGE_TYPES.WEATHER_REQUEST]: [MESSAGE_SOURCES.BROWSER],
   [MESSAGE_TYPES.ATIS_REQUEST]: [MESSAGE_SOURCES.BROWSER],
   [MESSAGE_TYPES.XPDR_SET_SQUAWK]: [MESSAGE_SOURCES.BROWSER],
@@ -132,6 +142,7 @@ function validatePayload(type, payload) {
     case MESSAGE_TYPES.PING:
     case MESSAGE_TYPES.PONG:
     case MESSAGE_TYPES.DEVICE_LIST:
+    case MESSAGE_TYPES.CHAT_HISTORY_REQUEST:
     case MESSAGE_TYPES.XPDR_IDENT:
     case MESSAGE_TYPES.TX_STOP:
     case MESSAGE_TYPES.MONITOR_STOP:
@@ -218,13 +229,29 @@ function validatePayload(type, payload) {
       return requireShape(payload, { recipient: isRecipient, text: isText });
 
     case MESSAGE_TYPES.CHAT_MESSAGE:
+      return validateChatMessagePayload(payload);
+
+    case MESSAGE_TYPES.CHAT_HISTORY:
+      return validateChatHistory(payload);
+
+    case MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE:
       return requireShape(payload, {
-        sender: isShortText,
-        recipient: isShortText,
-        text: isText,
-        timestamp: isIsoLike,
-      }, {
-        direction: isDirection,
+        endpoint: isPushEndpoint,
+        p256dh: isPushKey,
+        auth: isPushKey,
+        deviceId: isTokenLike,
+        deviceName: isShortText,
+        appUrl: isPushAppUrl,
+      });
+
+    case MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE:
+      return requireShape(payload, { endpoint: isPushEndpoint });
+
+    case MESSAGE_TYPES.NOTIFICATION_STATE:
+      return requireShape(payload, {
+        available: isBoolean,
+        vapidPublicKey: isPushKey,
+        subscriptionCount: isSubscriptionCount,
       });
 
     case MESSAGE_TYPES.WEATHER_REQUEST:
@@ -275,6 +302,35 @@ function requireShape(payload, required, optional = {}) {
   }
 
   return ok(normalized);
+}
+
+function validateChatMessagePayload(payload) {
+  return requireShape(payload, {
+    sender: isShortText,
+    recipient: isShortText,
+    text: isText,
+    timestamp: isIsoLike,
+  }, {
+    direction: isDirection,
+    messageId: isId,
+  });
+}
+
+function validateChatHistory(payload) {
+  if (!isPlainObject(payload) || Object.keys(payload).some((key) => key !== 'messages')) {
+    return fail('invalid chat history payload');
+  }
+  if (!Array.isArray(payload.messages) || payload.messages.length > 50) {
+    return fail('invalid payload field: messages');
+  }
+  const messages = [];
+  for (const message of payload.messages) {
+    if (!isPlainObject(message)) return fail('invalid chat history message');
+    const result = validateChatMessagePayload(message);
+    if (!result.ok) return result;
+    messages.push(result.payload);
+  }
+  return ok({ messages });
 }
 
 function validateStationsState(payload) {
@@ -485,8 +541,39 @@ function isUrlText(value) {
   }
 }
 
+function isPushEndpoint(value) {
+  if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 4096) return false;
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch (_) {
+    return false;
+  }
+}
+
+function isPushAppUrl(value) {
+  if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 512) return false;
+  try {
+    const parsed = new URL(value);
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+    return parsed.protocol === 'https:' || (parsed.protocol === 'http:' && loopback);
+  } catch (_) {
+    return false;
+  }
+}
+
+function isPushKey(value) {
+  return typeof value === 'string'
+    && value.length >= 8
+    && value.length <= 512
+    && /^[A-Za-z0-9_-]+$/.test(value);
+}
+
 function isBoolean(value) {
   return typeof value === 'boolean';
+}
+
+function isSubscriptionCount(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 32;
 }
 
 function isSampleRate(value) {

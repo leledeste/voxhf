@@ -106,6 +106,7 @@ function assertDatabaseShape(db) {
   ]) {
     assert.ok(tables.has(table), `${table} table should exist`);
   }
+  assert.ok(!tables.has('directory_servers'), 'removed public directory table should not exist');
 
   assert.strictEqual(
     db.prepare('SELECT version, name FROM schema_migrations').get().version,

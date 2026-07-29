@@ -39,6 +39,8 @@ function createLocalWebServer(options) {
     sendWeatherRequest: options.sendWeatherRequest,
     sendAtisRequest: options.sendAtisRequest,
     sendChatCommand: options.sendChatCommand,
+    notifications: options.notifications,
+    sendNotificationState,
   });
 
   const httpServer = http.createServer(createStaticWebHandler(webDir));
@@ -142,6 +144,11 @@ function createLocalWebServer(options) {
     for (const ws of wsClients) {
       if (isWsOpen(ws)) ws.send(json);
     }
+  }
+
+  function sendNotificationState(ws) {
+    if (!isWsOpen(ws)) return;
+    ws.send(JSON.stringify(options.notifications.getPublicState()));
   }
 
   function sendBinary(buffer) {

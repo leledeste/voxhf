@@ -126,6 +126,10 @@ function stageArchive(archive, destination, expectedVersion) {
     fs.cpSync(extracted, destination, { recursive: true, errorOnExist: true });
     const config = path.join(root, 'config.json');
     if (fs.existsSync(config)) fs.copyFileSync(config, path.join(destination, 'config.json'), fs.constants.COPYFILE_EXCL);
+    const localState = path.join(root, '.voxhf-local');
+    if (fs.existsSync(localState)) {
+      fs.cpSync(localState, path.join(destination, '.voxhf-local'), { recursive: true, errorOnExist: true });
+    }
   } catch (err) {
     fs.rmSync(destination, { recursive: true, force: true });
     throw err;

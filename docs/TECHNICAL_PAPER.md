@@ -1,7 +1,7 @@
 # VoxHF Technical Paper
 
-Version: 0.1.0  
-Status: first draft  
+Version: 0.1.1 Beta (`0.1.1-beta.1`)
+Status: first draft
 Date: 2026-06-27
 
 ## Abstract
@@ -105,6 +105,8 @@ focused modules:
 - `proxy/app-state.js`: callsign, connection state, radio state, XPDR state,
   flight-plan state, station snapshots, own position, and recent message
   history.
+- `proxy/push-notifications.js`: local VAPID credentials, per-device Push API
+  subscriptions, callsign/private-message matching, and Web Push delivery.
 - `proxy/remote-agent.js`: optional outbound Remote Preview connection to a
   relay.
 
@@ -127,8 +129,10 @@ The UI provides:
 - XPDR squawk, `STBY`, `ALT`, and IDENT controls.
 - Chat tabs for all messages, frequency messages, private messages, and
   per-peer private chats.
+- Current-session chat recovery after local or remote browser reconnect.
 - Dot-command autocomplete.
-- Settings panels for audio, connection, remote preview, and about.
+- Settings panels for audio, connection, remote preview, notifications, and
+  about.
 
 ### 4.3 `apps/relay`
 
@@ -141,7 +145,9 @@ allowlisted protocol messages between a paired browser and a selected agent.
 
 The protocol package defines Remote Preview message types and validation rules.
 It exists so the browser, relay, and local agent share the same explicit remote
-message vocabulary.
+message vocabulary. Typed messages cover live chat, explicit chat-history
+requests/responses, notification subscription changes, and public notification
+state without turning the relay into a raw tunnel.
 
 ## 5. Local Proxy Flow
 
@@ -375,6 +381,26 @@ been confirmed by another listener, but broader validation across more
 networks, browsers, and listeners is still required because IVAO does not echo
 the user's own transmitted audio.
 
+### 10.4 Session History And Web Push
+
+The local agent is the source of truth for both features:
+
+- `app-state` keeps a bounded recent message log in memory.
+- A local browser receives that log in its initial snapshot.
+- A remote browser requests the same log after every agent selection,
+  reconnect, or page refresh.
+- Message ids let the browser merge live traffic and recovered history without
+  duplicates.
+- Recovery never checks notification permission or Push API availability.
+
+Each browser installation creates its own Push API subscription after an
+explicit user action. The authenticated relay transports subscription changes
+to the selected agent but does not persist endpoints or originate
+notifications. The local agent stores subscriptions under `.voxhf-local`,
+matches incoming private messages or public text beginning with the active
+callsign, and sends a visible notification through `web-push`. The service
+worker opens the operational webapp when the notification is selected.
+
 ## 11. Security Model
 
 VoxHF uses defense in depth:
@@ -410,7 +436,10 @@ VoxHF handles data that can be sensitive:
 
 Privacy choices in the current design:
 
-- The local proxy does not store chat history across full restarts.
+- The local proxy keeps bounded chat recovery history only in memory for the
+  current process and does not preserve it across full restarts.
+- Push credentials and enabled-device subscriptions are stored only in the
+  local `.voxhf-local` state; the relay transports but does not persist them.
 - The relay does not store chat or audio.
 - Remote audio is live-only.
 - Logs avoid raw FSD/TS2 packets, audio payloads, complete tokens, and chat

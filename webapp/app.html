@@ -3,8 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101822">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="VoxHF">
   <title>Workspace | VoxHF</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest?v=20260729-2">
+  <link rel="stylesheet" href="styles.css?v=20260729-2">
 </head>
 <body>
   <div class="app">
@@ -200,6 +204,7 @@
         <button class="settings-tab active" type="button" data-settings-tab="audio">Audio</button>
         <button class="settings-tab" type="button" data-settings-tab="connection">Connection</button>
         <button class="settings-tab" type="button" data-settings-tab="remote">Remote</button>
+        <button class="settings-tab" type="button" data-settings-tab="notifications">Notifications</button>
         <button class="settings-tab" type="button" data-settings-tab="about">About</button>
       </div>
       <div class="settings-body">
@@ -360,6 +365,38 @@
           </div>
         </section>
 
+        <section class="settings-page hidden" data-settings-page="notifications">
+          <div class="settings-grid">
+            <div class="setting-row">
+              <span class="setting-label">Device Support</span>
+              <span id="settings-notification-support" class="setting-value">Checking</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Permission</span>
+              <span id="settings-notification-permission" class="setting-value">Not requested</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">This Device</span>
+              <span id="settings-notification-device" class="setting-value">Disabled</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Proxy</span>
+              <span id="settings-notification-proxy" class="setting-value">Waiting</span>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">Saved Devices</span>
+              <span id="settings-notification-count" class="setting-value">0</span>
+            </div>
+          </div>
+          <div id="settings-notification-status" class="auth-status">
+            Enable notifications separately on every device. The local proxy sends them for private messages and ATC messages beginning with your callsign.
+          </div>
+          <div class="settings-actions">
+            <button id="settings-notifications-enable" type="button">Enable on This Device</button>
+            <button id="settings-notifications-disable" type="button">Disable on This Device</button>
+          </div>
+        </section>
+
         <section class="settings-page hidden" data-settings-page="about">
           <div class="settings-grid">
             <div class="setting-row">
@@ -392,7 +429,7 @@
     </div>
   </div>
 
-  <script src="weather.js"></script>
-  <script src="app.js"></script>
+  <script src="weather.js?v=20260729-2"></script>
+  <script src="app.js?v=20260729-2"></script>
 </body>
 </html>

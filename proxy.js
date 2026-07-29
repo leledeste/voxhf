@@ -33,6 +33,7 @@ const { createPilotBridge } = require('./proxy/pilot-bridge');
 const { createFsdProxy } = require('./proxy/fsd-proxy');
 const { createAppState } = require('./proxy/app-state');
 const { createLocalWebServer } = require('./proxy/local-web-server');
+const { createPushNotifications } = require('./proxy/push-notifications');
 const { WS_OPEN } = require('./proxy/socket-utils');
 const { normalizeSquawkCode } = require('./proxy/fsd-parser');
 const {
@@ -68,6 +69,10 @@ let IVAO_FSD_HOST = 'ws-1.eu-west-2.ivao.aero';
 let remoteAgent = null;
 let webTx = null;
 let localWeb = null;
+const pushNotifications = createPushNotifications({
+  storageFile: path.join(__dirname, '.voxhf-local', 'notifications.json'),
+  logger: console,
+});
 const appState = createAppState({
   timestamp,
   publish: publishToClients,
@@ -135,7 +140,9 @@ remoteAgent = createRemoteAgent({
     getRadioState: appState.getRadioState,
     getStationsState: appState.getStationsState,
     getWeatherState: appState.getWeatherState,
+    getMessageLog: appState.getMessageLog,
   },
+  notifications: pushNotifications,
   commands: {
     setCom,
     sendChatCommand: fsdProxy.sendChatCommand,
@@ -160,6 +167,7 @@ localWeb = createLocalWebServer({
   logger: console,
   timestamp,
   remoteAgent,
+  notifications: pushNotifications,
   getPongState: () => ({
     ...appState.getStatus(),
     voiceServer: ts2Voice.getServer(),
@@ -176,6 +184,7 @@ localWeb = createLocalWebServer({
     txSampleRate: webTx.sampleRate,
     voiceServer: ts2Voice.getServer(),
     remotePairing: remoteAgent.getPairing(),
+    notifications: pushNotifications.getPublicState(),
   }),
   startWebTx: webTx.start,
   stopWebTx: webTx.stop,
@@ -197,6 +206,11 @@ function timestamp() {
 function publishToClients(data) {
   // This is the transport fan-out only. appState decides whether a message
   // should be stored in reconnect history before calling this publisher.
+  if (data.kind === 'message') {
+    pushNotifications.notifyForMessage(data, appState.getCallsign()).catch((err) => {
+      console.warn(`[PUSH] ${err.message}`);
+    });
+  }
   if (localWeb) localWeb.sendJson(data);
 
   if (remoteAgent) remoteAgent.publishFromLocal(data);

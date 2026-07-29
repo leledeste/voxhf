@@ -4,6 +4,18 @@ All notable VoxHF changes are recorded here.
 
 ## Unreleased
 
+## 0.1.1-beta.1 - 2026-07-29
+
+### Added
+
+- Restored the current proxy session's recent chat history after local or
+  remote browser refresh and reconnect, independently of notification support.
+- Added per-device Web Push notifications, sent by the local proxy for incoming
+  private messages and public messages beginning with the active callsign.
+- Added installable webapp metadata, a notification service worker, and
+  Settings controls to enable or disable each device without a synthetic test
+  message button.
+
 ### Changed
 
 - Expanded the visual setup guide and self-hosting reference with complete
@@ -12,14 +24,48 @@ All notable VoxHF changes are recorded here.
   beta, verified mobile interface, weather interpretation, automatic TX-session
   derivation, second-PC installation, and live VPS operations.
 - Replaced pre-release public-site labels with the current public-beta status.
+- Preserved private local notification credentials and subscriptions when a
+  Local Slim update is staged.
+- Simplified the top flight-plan indicator to show only the departure and
+  destination airports.
+- Reworked short tablet landscape layout so radios and chat remain aligned
+  while route weather moves to a full-width row below them.
+- Added versioned workspace asset URLs so browsers fetch updated Settings and
+  notification code immediately after a server update.
+- Simplified the internal project structure and maintenance guidance by
+  replacing the historical `CLAUDE.md` handoff with a concise repository-wide
+  `AGENTS.md`.
+- Reduced unused browser code by removing duplicate mobile visibility rules
+  and the screenshot-only runtime path.
 
 ### Fixed
 
+- Prevented the Settings dialog from becoming unresponsive after opening it on
+  iPad and stopped touch scrolling from moving the workspace behind the dialog.
+- Restored access to route METAR and TAF content in tablet landscape layouts.
+- Kept the radio and chat surfaces at a stable matching height while scrolling
+  short iPad landscape pages.
+- Removed the transient scrollbar flash when switching between All, Frequency,
+  Private, and System chat filters on desktop.
+- Closing a private-chat tab now hides only that tab and no longer removes its
+  messages from All, Private, or the restored session history.
+- Made the one-time mobile audio unlock listener remove itself after audio
+  starts, avoiding interference with subsequent iOS Settings taps.
 - Vertically aligned setup-route descriptions with their section headings.
 - Documented the guided and manual `config.json` setup for connecting Local
   Slim to an existing server.
 - Made release publication replace existing tag artifacts safely when a beta
   tag must be republished.
+- Preserved executable Unix permissions for the VPS operator script in release
+  ZIPs generated on Windows.
+
+### Removed
+
+- Removed the unused public server directory across the website, relay API,
+  heartbeat publisher, SQLite schema, CLI, configuration, tests, packaging,
+  and documentation.
+- Made the retired server-directory pages and API routes return `404` and
+  invalidated the previous workspace asset URLs.
 
 ## 0.1.0-beta.1 - 2026-07-14
 

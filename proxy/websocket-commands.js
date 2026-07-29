@@ -22,6 +22,17 @@ function createWebCommandHandler(deps) {
     if (cmd.action === 'remote_pairing_renew') {
       return deps.remoteAgent.renewPairingCode((text) => deps.sendSystem(ws, text));
     }
+    if (cmd.action === 'notification_subscribe') {
+      const result = deps.notifications.addSubscription(cmd.subscription);
+      if (!result.ok) deps.sendSystem(ws, result.error);
+      deps.sendNotificationState(ws);
+      return;
+    }
+    if (cmd.action === 'notification_unsubscribe') {
+      deps.notifications.removeSubscription(cmd.endpoint);
+      deps.sendNotificationState(ws);
+      return;
+    }
 
     if (cmd.action === 'sim_com1') {
       return sendCommandResult(deps, ws, deps.setCom(1, cmd.freq, cmd.station), `COM1 -> ${cmd.freq} MHz`);

@@ -1,7 +1,7 @@
 'use strict';
 
-// Serve the static public pages and demo workspace without starting the local
-// Altitude bridge. This is for visual review and screenshot generation only.
+// Serve the static public pages without starting the local Altitude bridge.
+// This is for visual review only.
 
 const fs = require('fs');
 const http = require('http');
@@ -15,6 +15,7 @@ const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
@@ -32,8 +33,7 @@ http.createServer((req, res) => {
 
   const route = pathname === '/' ? '/index.html'
     : pathname === '/setup' ? '/setup.html'
-      : pathname === '/servers' ? '/servers.html'
-        : pathname;
+      : pathname;
   const file = path.normalize(path.join(root, route.replace(/^\/+/, '')));
   const relative = path.relative(root, file);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {

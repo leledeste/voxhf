@@ -20,6 +20,10 @@ workspace while Altitude remains connected on the simulator PC.
 - Transmits from a desktop or phone microphone on COM1 or COM2.
 - Lets a phone act as the microphone for a simulator PC without one.
 - Sends frequency, broadcast, and private messages with command completion.
+- Restores the current proxy session's recent chat on every connected device
+  after a refresh or reconnect.
+- Sends opt-in device notifications for private messages and public ATC
+  messages that begin with the active callsign.
 - Controls squawk, STBY/ALT, and IDENT.
 - Shows route METAR and TAF with optional plain-language interpretation.
 - Runs locally without an account, or remotely through a private relay.
@@ -83,6 +87,9 @@ and [Threat Model](docs/THREAT_MODEL.md) for the detailed boundaries.
 - ffmpeg with Speex encoding and decoding
 - A current Chromium, Firefox, or Safari browser
 
+Web Push requires an HTTPS-hosted app. On iPhone and iPad it requires iOS or
+iPadOS 16.4 or newer and the hosted VoxHF app must be added to the Home Screen.
+
 Install the external tools with Winget when needed:
 
 ```powershell
@@ -126,21 +133,27 @@ network:
 4. Run `npm.cmd run setup -- agent` on the Altitude PC.
 5. Enter the relay URL, token, and a recognizable device name.
 6. Restart VoxHF and sign in from each trusted browser or phone.
+7. Optionally open **Settings > Notifications** on each device where alerts
+   should appear.
 
-The [server directory](https://voxhf.com/servers) is opt-in. A green heartbeat
-means only that a listed server recently contacted the directory. Independent
-servers can modify VoxHF and their data practices; their listing is not a
-security review or endorsement. The VoxHF-operated server, when available, is
-shown first and explicitly labelled.
+For Apple devices, follow the complete
+[iPhone/iPad notification procedure](docs/INSTALL_LOCAL.md#enable-notifications-on-iphone-or-ipad).
+
+Chat recovery and notifications are separate. The local agent keeps a bounded
+recent history for the current proxy session and sends it to every connected
+browser after opening, refreshing, or reconnecting. Notification permission may
+remain disabled without affecting that recovery. Restarting the proxy clears
+the session history.
 
 ## Privacy And Security
 
 Default design choices:
 
 - No voice recording.
-- No persistent full chat history.
+- No persistent full chat history; bounded recovery history exists only in the
+  running local proxy session.
 - No IVAO credentials in the browser or relay.
-- Hashed account, agent, invite, recovery, and heartbeat secrets.
+- Hashed account, agent, invite, and recovery secrets.
 - HttpOnly browser sessions for account mode.
 - Origin allowlists and an allowlisted remote command protocol.
 - Optional audit and session metadata storage, disabled by default.
@@ -155,11 +168,11 @@ the process in [SECURITY.md](SECURITY.md).
 Working and tested:
 
 - Local and remote COM, XPDR, messaging, weather, RX, and TX.
+- Multi-device session chat recovery and opt-in Web Push notifications.
 - Multiple browsers connected to one pilot agent.
 - Invite-only accounts, sessions, recovery, admin, and optional passkey MFA.
 - SQLite backup/restore and Docker/Caddy self-hosting.
 - Focused Local, Hosted Webapp, Server, and Full Source release packages.
-- Opt-in server directory registry with authenticated heartbeats.
 
 Still required before expanding beta access:
 
@@ -176,8 +189,8 @@ Current protocol and platform limitations are tracked in the
 | Path | Purpose |
 | --- | --- |
 | `proxy/` | Local PilotUI, PilotCore, FSD, TS2, voice, and browser agent |
-| `webapp/` | Workspace, login, landing, setup, privacy, and server directory |
-| `apps/relay/` | Remote routing, accounts, admin, SQLite, and directory API |
+| `webapp/` | Workspace, login, landing, setup, privacy, and legal pages |
+| `apps/relay/` | Remote routing, accounts, administration, and SQLite |
 | `packages/protocol/` | Shared validated remote message contract |
 | `infra/docker/` | Caddy, Docker Compose, and VPS operations |
 | `scripts/` | Setup, tests, backups, updates, and release tooling |
@@ -191,9 +204,9 @@ npm.cmd run remote:test
 npm.cmd audit
 ```
 
-Run `npm.cmd run site:preview` to review public pages and the demo workspace
-without opening Altitude bridge ports. See [Development](docs/DEVELOPMENT.md)
-for tests and diagnostics.
+Run `npm.cmd run site:preview` to review the public pages without opening
+Altitude bridge ports. See [Development](docs/DEVELOPMENT.md) for tests and
+diagnostics.
 
 ## Release Packages
 

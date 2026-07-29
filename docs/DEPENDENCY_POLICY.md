@@ -66,6 +66,10 @@ users who self-host, redistribute, or inspect VoxHF.
 Runtime npm dependencies:
 
 - `ws`: WebSocket server/client support, MIT license.
+- `web-push`: standards-based VAPID signing and Web Push delivery from the
+  local proxy, MPL-2.0 license. This dependency is accepted after explicit
+  review because it is used unmodified as a separate npm module; its license
+  and source notice remain in the installed package and release lockfile.
 - `@simplewebauthn/server` and `@simplewebauthn/browser`: optional admin
   passkey MFA, MIT license. Cryptographic WebAuthn verification remains in the
   maintained upstream package rather than project-specific code.

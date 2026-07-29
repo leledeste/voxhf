@@ -29,12 +29,18 @@ function createStaticWebHandler(webDir) {
     fs.readFile(filePath, (err, data) => {
       if (err) { res.writeHead(404); res.end('Not found'); return; }
       const ext = path.extname(filePath).toLowerCase();
-      const mime = ext === '.html' ? 'text/html; charset=utf-8' : ext === '.css' ? 'text/css' : ext === '.js' ? 'text/javascript' : 'text/plain';
+      const mime = ext === '.html' ? 'text/html; charset=utf-8'
+        : ext === '.css' ? 'text/css'
+          : ext === '.js' ? 'text/javascript'
+            : ext === '.json' ? 'application/json; charset=utf-8'
+              : ext === '.webmanifest' ? 'application/manifest+json; charset=utf-8'
+                : 'text/plain';
+      const noCache = ['release.json', 'sw.js', 'manifest.webmanifest'].includes(path.basename(filePath).toLowerCase());
       res.writeHead(200, {
         'Content-Type': mime,
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'no-referrer',
-        ...(path.basename(filePath).toLowerCase() === 'release.json' ? { 'Cache-Control': 'no-store' } : {}),
+        ...(noCache ? { 'Cache-Control': 'no-store' } : {}),
       });
       res.end(data);
     });

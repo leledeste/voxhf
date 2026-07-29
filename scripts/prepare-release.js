@@ -25,6 +25,9 @@ const FORBIDDEN_DIRECTORIES = new Set([
 const FORBIDDEN_EXTENSIONS = new Set([
   '.bin', '.db', '.dump', '.log', '.pcm', '.raw', '.sqlite', '.sqlite3',
 ]);
+const EXECUTABLE_RELEASE_PATHS = new Set([
+  'infra/docker/voxhf-server.sh',
+]);
 
 main().catch((err) => {
   console.error(`[release] ${err.message}`);
@@ -262,7 +265,11 @@ function zipDirectory(sourceDir, archivePath, rootName) {
     zip.outputStream.pipe(output);
     for (const file of walkFiles(sourceDir)) {
       const relative = path.relative(sourceDir, file).replace(/\\/g, '/');
-      zip.addFile(file, `${rootName}/${relative}`, { mtime: fs.statSync(file).mtime });
+      const mode = EXECUTABLE_RELEASE_PATHS.has(relative) ? 0o100755 : 0o100644;
+      zip.addFile(file, `${rootName}/${relative}`, {
+        mtime: fs.statSync(file).mtime,
+        mode,
+      });
     }
     zip.end();
   });
