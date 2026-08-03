@@ -10,6 +10,7 @@ const {
 
 const RX_PCM_CHUNK_BYTES = 32 * 1024;
 const TX_MAX_MS = 120 * 1000;
+const WATCHDOG_REFRESH_MS = 5 * 60 * 1000;
 
 function createRemoteAgent(options) {
   // Remote mode is deliberately outbound-only: the local proxy connects to the
@@ -35,6 +36,7 @@ function createRemoteAgent(options) {
   let remoteTxStats = null;
   let remoteTxRejectedWithoutSessionLogged = false;
   let updateRequired = false;
+  let watchdogRefreshTimer = null;
 
   const remoteTxSocket = {
     readyState: options.wsOpen,
@@ -73,6 +75,8 @@ function createRemoteAgent(options) {
       sendStationsState();
       sendWeatherState();
       sendNotificationState();
+      sendUnicomTimerState();
+      syncAgentWatchdog();
     });
 
     next.on('message', (raw, isBinary) => {
@@ -85,6 +89,8 @@ function createRemoteAgent(options) {
 
     next.on('close', () => {
       if (ws === next) ws = null;
+      clearTimeout(watchdogRefreshTimer);
+      watchdogRefreshTimer = null;
       stopRemoteWebTx('remote relay closed');
       scheduleReconnect();
     });
@@ -142,6 +148,11 @@ function createRemoteAgent(options) {
 
     if (message.type === MESSAGE_TYPES.PONG || message.type === MESSAGE_TYPES.DEVICE_STATE) return;
 
+    if (message.type === MESSAGE_TYPES.AGENT_WATCHDOG_FIRED) {
+      options.watchdog?.onFired?.(message.payload.sessionId);
+      return;
+    }
+
     if (message.type === MESSAGE_TYPES.PAIRING_CODE) {
       pairing = {
         code: message.payload.code,
@@ -190,11 +201,19 @@ function createRemoteAgent(options) {
         const result = options.notifications.addSubscription(message.payload);
         if (!result.ok) logger.warn(`[PUSH] ${result.error}`);
         sendNotificationState();
+        syncAgentWatchdog({ clearFirst: true });
         return;
       }
       case MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE:
         options.notifications.removeSubscription(message.payload.endpoint);
         sendNotificationState();
+        syncAgentWatchdog({ clearFirst: true });
+        return;
+      case MESSAGE_TYPES.UNICOM_TIMER_START:
+        commands.startUnicomTimer();
+        return;
+      case MESSAGE_TYPES.UNICOM_TIMER_CANCEL:
+        commands.cancelUnicomTimer();
         return;
       case MESSAGE_TYPES.WEATHER_REQUEST:
         commands.sendWeatherRequest(message.payload.kind, message.payload.icao, (text) => logger.warn(`[REMOTE] ${text}`), {
@@ -280,6 +299,16 @@ function createRemoteAgent(options) {
 
     if (data.kind === 'message') {
       sendChatMessage(data);
+      return;
+    }
+
+    if (data.kind === 'unicom_timer_state') {
+      sendUnicomTimerState(data);
+      return;
+    }
+
+    if (data.kind === 'unicom_timer_expired') {
+      send(MESSAGE_TYPES.UNICOM_TIMER_EXPIRED, { expiredAt: data.expiredAt });
     }
   }
 
@@ -405,6 +434,58 @@ function createRemoteAgent(options) {
     });
   }
 
+  function sendUnicomTimerState(value = options.state.getUnicomTimerState()) {
+    const payload = value?.active === true
+      ? {
+          active: true,
+          startedAt: value.startedAt,
+          expiresAt: value.expiresAt,
+        }
+      : { active: false };
+    send(MESSAGE_TYPES.UNICOM_TIMER_STATE, payload);
+  }
+
+  function syncAgentWatchdog({ clearFirst = false } = {}) {
+    // The agent refreshes sealed tickets before their VAPID signature expires.
+    // The relay owns only the offline grace period, never the flight session.
+    clearTimeout(watchdogRefreshTimer);
+    watchdogRefreshTimer = null;
+    if (!isOpen() || !options.watchdog) return false;
+
+    const watchdogState = options.watchdog.getState();
+    const sessionId = String(watchdogState?.sessionId || '');
+    if (watchdogState?.armed !== true || !sessionId) {
+      if (sessionId) send(MESSAGE_TYPES.AGENT_WATCHDOG_DISARM, { sessionId });
+      return false;
+    }
+
+    const tickets = options.notifications.createAgentOfflineWatchdogTickets(
+      options.state.getCallsign(),
+    );
+    if (!tickets.length) {
+      send(MESSAGE_TYPES.AGENT_WATCHDOG_DISARM, { sessionId });
+      scheduleWatchdogRefresh();
+      return false;
+    }
+
+    // A changed subscription set must revoke the previous batch before a new
+    // one is staged, so opting one device out cannot leave its old ticket live.
+    if (clearFirst) send(MESSAGE_TYPES.AGENT_WATCHDOG_DISARM, { sessionId });
+    const batchId = `watchdog-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    for (const ticket of tickets) {
+      send(MESSAGE_TYPES.AGENT_WATCHDOG_TICKET, { sessionId, batchId, ticket });
+    }
+    send(MESSAGE_TYPES.AGENT_WATCHDOG_COMMIT, { sessionId, batchId });
+    scheduleWatchdogRefresh();
+    return true;
+  }
+
+  function scheduleWatchdogRefresh() {
+    clearTimeout(watchdogRefreshTimer);
+    watchdogRefreshTimer = setTimeout(syncAgentWatchdog, WATCHDOG_REFRESH_MS);
+    watchdogRefreshTimer.unref?.();
+  }
+
   function renewPairingCode(report = () => {}) {
     // Pairing codes are owned by the relay. The local agent can ask for a fresh
     // short-lived code at any time without restarting the proxy.
@@ -521,6 +602,7 @@ function createRemoteAgent(options) {
     publishFromLocal,
     sendBinary,
     sendStatus,
+    syncAgentWatchdog,
     renewPairingCode,
     getPairing: () => pairing,
   };
@@ -578,6 +660,8 @@ function makeCommandRateLimits() {
     [MESSAGE_TYPES.CHAT_HISTORY_REQUEST, { max: 6, windowMs: 10_000 }],
     [MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE, { max: 6, windowMs: 60_000 }],
     [MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE, { max: 6, windowMs: 60_000 }],
+    [MESSAGE_TYPES.UNICOM_TIMER_START, { max: 6, windowMs: 10_000 }],
+    [MESSAGE_TYPES.UNICOM_TIMER_CANCEL, { max: 6, windowMs: 10_000 }],
     [MESSAGE_TYPES.WEATHER_REQUEST, { max: 6, windowMs: 10_000 }],
     [MESSAGE_TYPES.ATIS_REQUEST, { max: 6, windowMs: 10_000 }],
     [MESSAGE_TYPES.XPDR_SET_SQUAWK, { max: 6, windowMs: 10_000 }],

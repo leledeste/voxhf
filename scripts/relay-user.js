@@ -1,11 +1,10 @@
 'use strict';
 
-// Small helper for the preview relay user registry.
+// Compatibility helper for the file-based relay user registry.
 //
-// The current Remote Preview does not have a database or admin dashboard.
-// Independent users are configured through VOXHF_RELAY_USERS in a .env file.
-// This script edits that one setting safely and prints newly generated tokens
-// only when they are created or rotated.
+// Relays using environment authentication configure independent users through
+// VOXHF_RELAY_USERS. This script edits that setting safely and prints newly
+// generated tokens only when they are created or rotated.
 
 const crypto = require('crypto');
 const fs = require('fs');

@@ -330,6 +330,14 @@ label displayed to the user.
 Start VoxHF normally. The console should report the remote agent connection.
 Logged-in browsers for that account will see the agent.
 
+The optional **PC / Proxy Offline Alert** uses the relay's native agent
+heartbeat and a 30-second grace period by default. The local proxy supplies short-lived
+Push requests that are already encrypted and signed; the relay keeps them only
+in process memory and deletes them before one-time delivery. The built-in
+destination allowlist covers current major browser Push services. Operators
+should set `VOXHF_WATCHDOG_PUSH_ORIGINS` only when an intentionally supported
+browser uses another trusted exact HTTPS Push origin.
+
 Alternatively, generate the same configuration interactively:
 
 ```powershell

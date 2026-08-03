@@ -122,7 +122,7 @@ function importRelayUserToken(db, input) {
       FROM agent_tokens
       WHERE user_id = ? AND name = ? AND revoked_at IS NULL
       ORDER BY created_at DESC
-    `).all(user.id, input.tokenName || 'Relay preview token');
+    `).all(user.id, input.tokenName || 'VoxHF agent token');
 
     if (existing.some((row) => row.token_hash === tokenHash)) {
       return { action: 'unchanged', userId, tokenPrefix: tokenPrefix(token) };
@@ -135,7 +135,7 @@ function importRelayUserToken(db, input) {
     `).run({
       now,
       userId: user.id,
-      name: input.tokenName || 'Relay preview token',
+      name: input.tokenName || 'VoxHF agent token',
     });
 
     db.prepare(`
@@ -144,7 +144,7 @@ function importRelayUserToken(db, input) {
     `).run({
       id: `tok_${crypto.randomUUID()}`,
       userId: user.id,
-      name: input.tokenName || 'Relay preview token',
+      name: input.tokenName || 'VoxHF agent token',
       tokenPrefix: tokenPrefix(token),
       tokenHash,
       now,
@@ -201,7 +201,7 @@ function createRelayAccount(db, input) {
     `).run({
       id: `tok_${crypto.randomUUID()}`,
       userId: dbUserId,
-      name: input.tokenName || 'Relay preview token',
+      name: input.tokenName || 'VoxHF agent token',
       tokenPrefix: tokenPrefix(token),
       tokenHash,
       now,

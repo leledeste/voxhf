@@ -4,6 +4,55 @@ All notable VoxHF changes are recorded here.
 
 ## Unreleased
 
+## 0.1.2-beta.1 - 2026-08-03
+
+### Added
+
+- Added per-device Web Push alerts when a previously confirmed IVAO connection
+  remains disconnected for ten seconds, with local retries for temporary
+  Internet outages while the proxy keeps running. The alert is suppressed only
+  when fresh telemetry shows the aircraft stationary at no more than five
+  knots; missing or stale telemetry fails safe by notifying.
+- Added an optional per-device IVAO online confirmation alert. Incoming SERVER
+  welcome messages remain in chat but do not generate Push notifications during
+  the first two seconds of a confirmed IVAO connection.
+- Added a proxy-owned three-minute UNICOM reminder. Its countdown stays in sync
+  across connected devices, survives browser refreshes and mobile suspension,
+  and sends a Push alert to subscribed devices when it expires.
+- Added an optional per-device PC/proxy offline alert for remote mode. During a
+  confirmed IVAO session, the relay can use a short-lived Push request that the
+  local proxy already encrypted and signed if that proxy remains unreachable
+  after the disconnect grace period. The ticket is memory-only, one-use, and
+  removed on reconnect, normal IVAO disconnect, expiry, opt-out, or relay
+  restart; the relay never receives the local VAPID private key.
+
+### Changed
+
+- Replaced the browser-native PC/proxy offline opt-in confirmation with an
+  accessible VoxHF dialog that summarizes how the temporary relay ticket works.
+- Simplified hosted workspace account access by directing sign-in and
+  registration to the dedicated account page instead of duplicating those
+  controls inside the operational app.
+- Reduced the shipped frontend surface by removing unused styles and historical
+  screenshot assets that were no longer part of the product.
+- Simplified relay maintenance by separating account, administration,
+  credential, and session responsibilities from live WebSocket routing without
+  changing their external behavior.
+- Simplified workspace maintenance by separating account and browser-session
+  behavior from live flight, WebSocket, radio, chat, notification, and audio
+  state without changing the visible account flow.
+
+### Fixed
+
+- Let route METAR and TAF content extend the normal page height on phones,
+  avoiding an inaccessible nested weather scroller in iOS Safari.
+- Added an iOS/iPadOS-only RX activation prompt that makes WebKit's required
+  first gesture explicit, disappears when audio is running, and returns if
+  automatic recovery after browser standby cannot resume RX.
+- Stabilized Web TX readiness when Altitude exposes multiple TS2 UDP flows by
+  ignoring unrelated packets and replacing a validated transmit-session seed
+  atomically, without changing the established voice-channel routing.
+
 ## 0.1.1-beta.1 - 2026-07-29
 
 ### Added

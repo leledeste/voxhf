@@ -24,6 +24,7 @@ process.on('uncaughtException', (err) => {
 
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { readConfig, listLocalNetworkIps, detectLanIp } = require('./proxy/config');
 const { failListen } = require('./proxy/port-diagnostics');
 const { createRemoteAgent } = require('./proxy/remote-agent');
@@ -31,9 +32,10 @@ const { createWebTx } = require('./proxy/web-tx');
 const { createTs2VoiceProxy } = require('./proxy/ts2-voice-proxy');
 const { createPilotBridge } = require('./proxy/pilot-bridge');
 const { createFsdProxy } = require('./proxy/fsd-proxy');
-const { createAppState } = require('./proxy/app-state');
+const { createAppState, disconnectAlertSuppressionReason } = require('./proxy/app-state');
 const { createLocalWebServer } = require('./proxy/local-web-server');
 const { createPushNotifications } = require('./proxy/push-notifications');
+const { createUnicomTimer } = require('./proxy/unicom-timer');
 const { WS_OPEN } = require('./proxy/socket-utils');
 const { normalizeSquawkCode } = require('./proxy/fsd-parser');
 const {
@@ -57,6 +59,10 @@ const FSD_PORT = 6809;                   // FSD IVAO
 const TS2_PORT = 8767;                   // TeamSpeak 2 voice
 const WEB_PORT = 3000;
 const WEB_HOST = '127.0.0.1';
+const IVAO_DISCONNECT_ALERT_DELAY_MS = 10_000;
+const IVAO_DISCONNECT_ALERT_RETRY_MS = 30_000;
+const IVAO_DISCONNECT_ALERT_WINDOW_MS = 30 * 60 * 1000;
+const IVAO_STARTUP_NOTIFICATION_QUIET_MS = 2_000;
 
 const LOCAL_IPS = listLocalNetworkIps();
 const LAN_IP = detectLanIp(CONFIG.lanIp, LOCAL_IPS);
@@ -69,6 +75,19 @@ let IVAO_FSD_HOST = 'ws-1.eu-west-2.ivao.aero';
 let remoteAgent = null;
 let webTx = null;
 let localWeb = null;
+let ivaoDisconnectAlertTimer = null;
+let ivaoDisconnectAlertDeadline = 0;
+let ivaoDisconnectAlertGeneration = 0;
+let ivaoConnectionGeneration = 0;
+let ivaoConnectedAlertTimer = null;
+let ivaoStartupNotificationQuietUntil = 0;
+let ivaoStartupSuppressionLogged = false;
+let agentWatchdogState = { armed: false, sessionId: '' };
+
+// Disconnect handling has two independent failure paths: the running proxy can
+// notify locally after FSD closes, while the relay watchdog covers loss of the
+// whole proxy/PC. A flight session id prevents either path from cancelling a
+// later connection's alert.
 const pushNotifications = createPushNotifications({
   storageFile: path.join(__dirname, '.voxhf-local', 'notifications.json'),
   logger: console,
@@ -76,6 +95,11 @@ const pushNotifications = createPushNotifications({
 const appState = createAppState({
   timestamp,
   publish: publishToClients,
+});
+const unicomTimer = createUnicomTimer({
+  logger: console,
+  onState: state => broadcast({ kind: 'unicom_timer_state', ...state }),
+  onExpired: deliverUnicomTimerAlert,
 });
 
 const pilotBridge = createPilotBridge({
@@ -105,10 +129,15 @@ const fsdProxy = createFsdProxy({
   getHost: () => IVAO_FSD_HOST,
   getLanIp: () => LAN_IP,
   onVoiceServer: updateVoiceServer,
-  onClose: () => {
+  onConnected: handleIvaoConnected,
+  onClose: ({ wasConnected } = {}) => {
+    cancelIvaoConnectedAlert();
+    if (wasConnected) disarmAgentOfflineWatchdog();
+    console.warn(`[6809] IVAO session closed (${wasConnected ? 'connection confirmed' : 'connection not confirmed'}).`);
     ts2Voice.stopVoiceDecoder();
     ts2Voice.resetUdpClients('FSD disconnected');
     clearWebTxReadiness('FSD disconnected');
+    if (wasConnected) scheduleIvaoDisconnectAlert();
   },
 });
 
@@ -141,6 +170,11 @@ remoteAgent = createRemoteAgent({
     getStationsState: appState.getStationsState,
     getWeatherState: appState.getWeatherState,
     getMessageLog: appState.getMessageLog,
+    getUnicomTimerState: unicomTimer.getState,
+  },
+  watchdog: {
+    getState: () => ({ ...agentWatchdogState }),
+    onFired: handleAgentWatchdogFired,
   },
   notifications: pushNotifications,
   commands: {
@@ -151,6 +185,8 @@ remoteAgent = createRemoteAgent({
     setSquawk,
     toggleXpdr,
     sendIdent,
+    startUnicomTimer: unicomTimer.start,
+    cancelUnicomTimer: unicomTimer.cancel,
   },
   tx: {
     start: webTx.start,
@@ -185,6 +221,7 @@ localWeb = createLocalWebServer({
     voiceServer: ts2Voice.getServer(),
     remotePairing: remoteAgent.getPairing(),
     notifications: pushNotifications.getPublicState(),
+    unicomTimer: unicomTimer.getState(),
   }),
   startWebTx: webTx.start,
   stopWebTx: webTx.stop,
@@ -196,6 +233,9 @@ localWeb = createLocalWebServer({
   sendWeatherRequest: fsdProxy.sendWeatherRequest,
   sendAtisRequest: fsdProxy.sendAtisRequest,
   sendChatCommand: fsdProxy.sendChatCommand,
+  startUnicomTimer: unicomTimer.start,
+  cancelUnicomTimer: unicomTimer.cancel,
+  onNotificationsChanged: () => remoteAgent?.syncAgentWatchdog({ clearFirst: true }),
 });
 
 function timestamp() {
@@ -203,13 +243,148 @@ function timestamp() {
   return new Date().toISOString();
 }
 
+function handleIvaoConnected() {
+  cancelIvaoDisconnectAlert('IVAO reconnected');
+  armAgentOfflineWatchdog();
+  cancelIvaoConnectedAlert();
+  const generation = ivaoConnectionGeneration;
+  ivaoStartupNotificationQuietUntil = Date.now() + IVAO_STARTUP_NOTIFICATION_QUIET_MS;
+  ivaoStartupSuppressionLogged = false;
+  ivaoConnectedAlertTimer = setTimeout(async () => {
+    ivaoConnectedAlertTimer = null;
+    if (generation !== ivaoConnectionGeneration || !fsdProxy.isConnected()) return;
+    try {
+      await pushNotifications.notifyIvaoConnected(appState.getCallsign());
+    } catch (err) {
+      console.warn(`[PUSH] IVAO online alert failed: ${err.message}`);
+    }
+  }, IVAO_STARTUP_NOTIFICATION_QUIET_MS);
+}
+
+function cancelIvaoConnectedAlert() {
+  ivaoConnectionGeneration += 1;
+  if (ivaoConnectedAlertTimer) clearTimeout(ivaoConnectedAlertTimer);
+  ivaoConnectedAlertTimer = null;
+  ivaoStartupNotificationQuietUntil = 0;
+}
+
+function armAgentOfflineWatchdog() {
+  agentWatchdogState = {
+    armed: true,
+    sessionId: `flight-${crypto.randomUUID()}`,
+  };
+  remoteAgent?.syncAgentWatchdog();
+}
+
+function disarmAgentOfflineWatchdog() {
+  if (!agentWatchdogState.sessionId) return;
+  agentWatchdogState = { ...agentWatchdogState, armed: false };
+  remoteAgent?.syncAgentWatchdog();
+}
+
+function handleAgentWatchdogFired(sessionId) {
+  if (!sessionId || sessionId !== agentWatchdogState.sessionId) return;
+  cancelIvaoDisconnectAlert('relay watchdog already notified subscribed devices');
+}
+
+function scheduleIvaoDisconnectAlert() {
+  cancelIvaoDisconnectAlert();
+  if (pushNotifications.getPublicState().subscriptionCount < 1) {
+    console.warn('[PUSH] IVAO disconnect alert not scheduled: no subscribed devices.');
+    return;
+  }
+  // Suppression fails safe: absent, malformed, or stale telemetry produces no
+  // reason here and the disconnect notification is scheduled.
+  const suppressionReason = disconnectAlertSuppressionReason(appState.getFlightTelemetry());
+  if (suppressionReason) {
+    console.log(`[PUSH] IVAO disconnect alert suppressed: ${suppressionReason}.`);
+    return;
+  }
+  const generation = ivaoDisconnectAlertGeneration;
+  ivaoDisconnectAlertDeadline = Date.now() + IVAO_DISCONNECT_ALERT_WINDOW_MS;
+  ivaoDisconnectAlertTimer = setTimeout(
+    () => deliverIvaoDisconnectAlert(generation),
+    IVAO_DISCONNECT_ALERT_DELAY_MS,
+  );
+  console.warn('[PUSH] IVAO disconnect alert scheduled in 10 seconds.');
+}
+
+function cancelIvaoDisconnectAlert(reason = '') {
+  const wasPending = Boolean(ivaoDisconnectAlertTimer || ivaoDisconnectAlertDeadline);
+  ivaoDisconnectAlertGeneration += 1;
+  if (ivaoDisconnectAlertTimer) clearTimeout(ivaoDisconnectAlertTimer);
+  ivaoDisconnectAlertTimer = null;
+  ivaoDisconnectAlertDeadline = 0;
+  if (wasPending && reason) console.log(`[PUSH] IVAO disconnect alert cancelled: ${reason}.`);
+}
+
+async function deliverIvaoDisconnectAlert(generation) {
+  if (generation !== ivaoDisconnectAlertGeneration) return;
+  ivaoDisconnectAlertTimer = null;
+  if (fsdProxy.isConnected()) {
+    cancelIvaoDisconnectAlert('IVAO reconnected');
+    return;
+  }
+  if (Date.now() > ivaoDisconnectAlertDeadline) {
+    cancelIvaoDisconnectAlert('30-minute retry window expired');
+    return;
+  }
+
+  try {
+    console.log('[PUSH] Sending IVAO disconnect alert.');
+    const result = await pushNotifications.notifyIvaoDisconnected(appState.getCallsign());
+    if (generation !== ivaoDisconnectAlertGeneration) return;
+    if (result.sent > 0) {
+      cancelIvaoDisconnectAlert();
+      return;
+    }
+    if (result.subscriptionCount < 1) {
+      cancelIvaoDisconnectAlert('no subscribed devices remain');
+      return;
+    }
+    if (fsdProxy.isConnected()) {
+      cancelIvaoDisconnectAlert('IVAO reconnected during delivery');
+      return;
+    }
+  } catch (err) {
+    console.warn(`[PUSH] IVAO disconnect alert failed: ${err.message}`);
+  }
+
+  if (Date.now() + IVAO_DISCONNECT_ALERT_RETRY_MS > ivaoDisconnectAlertDeadline) {
+    cancelIvaoDisconnectAlert('30-minute retry window expired');
+    return;
+  }
+  console.warn('[PUSH] IVAO disconnect alert not delivered; retrying in 30 seconds.');
+  ivaoDisconnectAlertTimer = setTimeout(
+    () => deliverIvaoDisconnectAlert(generation),
+    IVAO_DISCONNECT_ALERT_RETRY_MS,
+  );
+}
+
+async function deliverUnicomTimerAlert({ expiredAt }) {
+  broadcast({ kind: 'unicom_timer_expired', expiredAt });
+  console.log('[PUSH] Sending UNICOM timer alert.');
+  const result = await pushNotifications.notifyUnicomTimerExpired(appState.getCallsign());
+  if (result.sent < 1) {
+    console.warn('[PUSH] UNICOM timer alert was not delivered to a subscribed device.');
+  }
+}
+
 function publishToClients(data) {
   // This is the transport fan-out only. appState decides whether a message
   // should be stored in reconnect history before calling this publisher.
   if (data.kind === 'message') {
-    pushNotifications.notifyForMessage(data, appState.getCallsign()).catch((err) => {
-      console.warn(`[PUSH] ${err.message}`);
-    });
+    const suppressStartupServer = Date.now() < ivaoStartupNotificationQuietUntil;
+    pushNotifications.notifyForMessage(data, appState.getCallsign(), { suppressStartupServer })
+      .then((result) => {
+        if (result.suppressed === 'ivao-startup-server' && !ivaoStartupSuppressionLogged) {
+          ivaoStartupSuppressionLogged = true;
+          console.log('[PUSH] IVAO startup SERVER notifications suppressed for 2 seconds.');
+        }
+      })
+      .catch((err) => {
+        console.warn(`[PUSH] ${err.message}`);
+      });
   }
   if (localWeb) localWeb.sendJson(data);
 
@@ -294,7 +469,7 @@ function setAltitudeTxLamp(com, active) {
 
 function deliverRxPcm(pcm) {
   // The browser audio renderer already consumes raw 16-bit mono PCM. Reuse that
-  // exact format locally and remotely to keep Remote RX simple for the preview.
+  // exact format locally and remotely to keep Remote RX simple.
   if (localWeb) localWeb.sendBinary(pcm);
   remoteAgent.sendBinary(pcm);
 }

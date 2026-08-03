@@ -39,7 +39,10 @@ function createLocalWebServer(options) {
     sendWeatherRequest: options.sendWeatherRequest,
     sendAtisRequest: options.sendAtisRequest,
     sendChatCommand: options.sendChatCommand,
+    startUnicomTimer: options.startUnicomTimer,
+    cancelUnicomTimer: options.cancelUnicomTimer,
     notifications: options.notifications,
+    onNotificationsChanged: options.onNotificationsChanged,
     sendNotificationState,
   });
 

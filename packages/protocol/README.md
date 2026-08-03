@@ -26,10 +26,18 @@ The validator rejects unknown types, extra fields, invalid source/type
 combinations, oversized JSON, out-of-range values, and raw FSD/TS2/PilotCore
 commands.
 
-Browsers can send only typed controls such as radio, chat, weather, XPDR, and
-TX state. Agents publish typed status, stations, chat, weather, and audio.
+Browsers can send only typed controls such as radio, chat, weather, XPDR,
+UNICOM timer, and TX state. Agents publish typed status, stations, chat,
+weather, UNICOM timer state, and audio.
 The relay routes valid messages only within the authenticated user and selected
 agent scope.
+
+Agent-offline watchdog messages are relay-internal and never forwarded to
+browsers. Only the authenticated current agent may stage sealed
+`agent.watchdog.ticket` batches, commit them atomically, or disarm a session.
+The relay alone may return `agent.watchdog.fired`. Ticket fields are strictly
+bounded and carry a short-lived Push request already encrypted and signed by
+the local proxy; no VAPID private key crosses this protocol.
 
 ```js
 const {

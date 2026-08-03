@@ -21,7 +21,7 @@ const {
 } = require('../apps/relay/db');
 
 const root = path.resolve(__dirname, '..');
-const DEFAULT_TOKEN_NAME = 'Relay preview token';
+const DEFAULT_TOKEN_NAME = 'VoxHF agent token';
 const USER_ID_RE = /^[A-Za-z0-9._-]{2,48}$/;
 const TOKEN_RE = /^[A-Za-z0-9._:-]{16,256}$/;
 

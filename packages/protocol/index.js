@@ -1,8 +1,8 @@
 'use strict';
 
-// Shared protocol rules for the planned VoxHF Remote relay.
+// Shared protocol rules for the VoxHF Remote relay.
 // This module has no external dependencies so the agent, relay, tests, and
-// eventually browser tooling can reuse the same allowlist.
+// browser-side protocol implementation can follow the same allowlist.
 
 const REMOTE_PROTOCOL_VERSION = 1;
 const MAX_JSON_MESSAGE_BYTES = 64 * 1024;
@@ -40,6 +40,14 @@ const MESSAGE_TYPES = Object.freeze({
   NOTIFICATION_SUBSCRIBE: 'notification.subscribe',
   NOTIFICATION_UNSUBSCRIBE: 'notification.unsubscribe',
   NOTIFICATION_STATE: 'notification.state',
+  AGENT_WATCHDOG_TICKET: 'agent.watchdog.ticket',
+  AGENT_WATCHDOG_COMMIT: 'agent.watchdog.commit',
+  AGENT_WATCHDOG_DISARM: 'agent.watchdog.disarm',
+  AGENT_WATCHDOG_FIRED: 'agent.watchdog.fired',
+  UNICOM_TIMER_START: 'unicom.timer.start',
+  UNICOM_TIMER_CANCEL: 'unicom.timer.cancel',
+  UNICOM_TIMER_STATE: 'unicom.timer.state',
+  UNICOM_TIMER_EXPIRED: 'unicom.timer.expired',
   WEATHER_REQUEST: 'weather.request',
   ATIS_REQUEST: 'atis.request',
   XPDR_SET_SQUAWK: 'xpdr.setSquawk',
@@ -77,6 +85,14 @@ const SOURCE_RULES = Object.freeze({
   [MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE]: [MESSAGE_SOURCES.BROWSER],
   [MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE]: [MESSAGE_SOURCES.BROWSER],
   [MESSAGE_TYPES.NOTIFICATION_STATE]: [MESSAGE_SOURCES.AGENT],
+  [MESSAGE_TYPES.AGENT_WATCHDOG_TICKET]: [MESSAGE_SOURCES.AGENT],
+  [MESSAGE_TYPES.AGENT_WATCHDOG_COMMIT]: [MESSAGE_SOURCES.AGENT],
+  [MESSAGE_TYPES.AGENT_WATCHDOG_DISARM]: [MESSAGE_SOURCES.AGENT],
+  [MESSAGE_TYPES.AGENT_WATCHDOG_FIRED]: [MESSAGE_SOURCES.RELAY],
+  [MESSAGE_TYPES.UNICOM_TIMER_START]: [MESSAGE_SOURCES.BROWSER],
+  [MESSAGE_TYPES.UNICOM_TIMER_CANCEL]: [MESSAGE_SOURCES.BROWSER],
+  [MESSAGE_TYPES.UNICOM_TIMER_STATE]: [MESSAGE_SOURCES.AGENT],
+  [MESSAGE_TYPES.UNICOM_TIMER_EXPIRED]: [MESSAGE_SOURCES.AGENT],
   [MESSAGE_TYPES.WEATHER_REQUEST]: [MESSAGE_SOURCES.BROWSER],
   [MESSAGE_TYPES.ATIS_REQUEST]: [MESSAGE_SOURCES.BROWSER],
   [MESSAGE_TYPES.XPDR_SET_SQUAWK]: [MESSAGE_SOURCES.BROWSER],
@@ -144,6 +160,8 @@ function validatePayload(type, payload) {
     case MESSAGE_TYPES.DEVICE_LIST:
     case MESSAGE_TYPES.CHAT_HISTORY_REQUEST:
     case MESSAGE_TYPES.XPDR_IDENT:
+    case MESSAGE_TYPES.UNICOM_TIMER_START:
+    case MESSAGE_TYPES.UNICOM_TIMER_CANCEL:
     case MESSAGE_TYPES.TX_STOP:
     case MESSAGE_TYPES.MONITOR_STOP:
       return noExtraPayload(payload);
@@ -242,6 +260,9 @@ function validatePayload(type, payload) {
         deviceId: isTokenLike,
         deviceName: isShortText,
         appUrl: isPushAppUrl,
+      }, {
+        notifyIvaoConnected: isBoolean,
+        notifyAgentOffline: isBoolean,
       });
 
     case MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE:
@@ -253,6 +274,22 @@ function validatePayload(type, payload) {
         vapidPublicKey: isPushKey,
         subscriptionCount: isSubscriptionCount,
       });
+
+    case MESSAGE_TYPES.AGENT_WATCHDOG_TICKET:
+      return validateAgentWatchdogTicket(payload);
+
+    case MESSAGE_TYPES.AGENT_WATCHDOG_COMMIT:
+      return requireShape(payload, { sessionId: isTokenLike, batchId: isTokenLike });
+
+    case MESSAGE_TYPES.AGENT_WATCHDOG_DISARM:
+    case MESSAGE_TYPES.AGENT_WATCHDOG_FIRED:
+      return requireShape(payload, { sessionId: isTokenLike });
+
+    case MESSAGE_TYPES.UNICOM_TIMER_STATE:
+      return validateUnicomTimerState(payload);
+
+    case MESSAGE_TYPES.UNICOM_TIMER_EXPIRED:
+      return requireShape(payload, { expiredAt: isIsoLike });
 
     case MESSAGE_TYPES.WEATHER_REQUEST:
       return requireShape(payload, { kind: isWeatherKind, icao: isIcao }, {
@@ -314,6 +351,47 @@ function validateChatMessagePayload(payload) {
     direction: isDirection,
     messageId: isId,
   });
+}
+
+function validateUnicomTimerState(payload) {
+  // Inactive state is canonicalized to one field so stale timestamps cannot be
+  // replayed by a relay snapshot after cancellation.
+  if (!isPlainObject(payload)) return fail('payload must be an object');
+  const allowed = new Set(['active', 'startedAt', 'expiresAt']);
+  for (const key of Object.keys(payload)) {
+    if (!allowed.has(key)) return fail(`unexpected payload field: ${key}`);
+  }
+  if (!isBoolean(payload.active)) return fail('invalid payload field: active');
+  if (!payload.active) {
+    if (Object.keys(payload).length !== 1) return fail('inactive timer payload must contain only active');
+    return ok({ active: false });
+  }
+  if (!isIsoLike(payload.startedAt)) return fail('invalid payload field: startedAt');
+  if (!isIsoLike(payload.expiresAt)) return fail('invalid payload field: expiresAt');
+  return ok({ active: true, startedAt: payload.startedAt, expiresAt: payload.expiresAt });
+}
+
+function validateAgentWatchdogTicket(payload) {
+  // The sealed request is opaque but still strictly bounded. Destination
+  // allowlisting is enforced separately by the relay immediately before use.
+  if (!isPlainObject(payload)) return fail('payload must be an object');
+  const allowed = new Set(['sessionId', 'batchId', 'ticket']);
+  for (const key of Object.keys(payload)) {
+    if (!allowed.has(key)) return fail(`unexpected payload field: ${key}`);
+  }
+  if (!isTokenLike(payload.sessionId)) return fail('invalid payload field: sessionId');
+  if (!isTokenLike(payload.batchId)) return fail('invalid payload field: batchId');
+  if (!isPlainObject(payload.ticket)) return fail('invalid payload field: ticket');
+  const result = requireShape(payload.ticket, {
+    deviceId: isTokenLike,
+    endpoint: isPushEndpoint,
+    expiresAt: isIsoLike,
+    authorization: isWatchdogAuthorization,
+    contentEncoding: isWatchdogContentEncoding,
+    body: isWatchdogBody,
+  });
+  if (!result.ok) return result;
+  return ok({ sessionId: payload.sessionId, batchId: payload.batchId, ticket: result.payload });
 }
 
 function validateChatHistory(payload) {
@@ -565,6 +643,24 @@ function isPushKey(value) {
   return typeof value === 'string'
     && value.length >= 8
     && value.length <= 512
+    && /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+function isWatchdogAuthorization(value) {
+  return typeof value === 'string'
+    && value.length >= 16
+    && Buffer.byteLength(value, 'utf8') <= 4096
+    && !/[\r\n]/.test(value);
+}
+
+function isWatchdogContentEncoding(value) {
+  return value === 'aes128gcm';
+}
+
+function isWatchdogBody(value) {
+  return typeof value === 'string'
+    && value.length >= 16
+    && Buffer.byteLength(value, 'utf8') <= 24 * 1024
     && /^[A-Za-z0-9_-]+$/.test(value);
 }
 

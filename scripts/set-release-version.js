@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '..');
 const version = String(process.argv[2] || '').trim().replace(/^v/i, '');
 const setMinimum = process.argv.includes('--minimum');
 if (!/^\d+(?:\.\d+){2}(?:-[A-Za-z0-9.:-]+)?$/.test(version)) {
-  console.error('Usage: npm run release:version -- 0.1.1 [--minimum]');
+  console.error('Usage: npm run release:version -- <version> [--minimum]');
   process.exit(1);
 }
 

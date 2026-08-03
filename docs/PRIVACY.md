@@ -36,8 +36,14 @@ Optional persistence is disabled by default:
 - Full message contents.
 - Full authentication tokens.
 - Pairing and registration invite codes after use or expiry.
-- Browser push endpoints or push encryption keys. These pass through the relay
-  only as live authenticated commands to the selected local agent.
+- Browser Push subscriptions or Push encryption keys. Subscription commands
+  pass through the relay only to the selected local agent. If a user explicitly
+  enables the agent-offline watchdog, the relay temporarily holds a Push
+  endpoint and a short-lived request already encrypted and signed by that
+  agent. It remains in memory only and is deleted after use, disarm, replacement,
+  expiry, or relay restart. Its signature expires within 15 minutes; a modified
+  relay could replay only that same opaque alert before expiry, not read or
+  alter it.
 
 ## Data Kept By The Local Agent
 
@@ -63,6 +69,8 @@ Suggested defaults:
 - Preview paired-browser records: until browser revocation or manual relay store deletion.
 - SQLite backups and pre-restore database copies: 30 days by default.
 - Raw remote payloads: not persisted.
+- Agent-offline Push tickets: memory-only, at most 20 minutes, normally
+  refreshed every 5 minutes, and one-use after the offline grace period.
 
 Self-hosted operators can choose different retention, but they should document it.
 

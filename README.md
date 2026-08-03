@@ -20,10 +20,19 @@ workspace while Altitude remains connected on the simulator PC.
 - Transmits from a desktop or phone microphone on COM1 or COM2.
 - Lets a phone act as the microphone for a simulator PC without one.
 - Sends frequency, broadcast, and private messages with command completion.
+- Provides a manual three-minute UNICOM reminder that stays synchronized across
+  connected devices and sends a Push alert when it expires.
 - Restores the current proxy session's recent chat on every connected device
   after a refresh or reconnect.
 - Sends opt-in device notifications for private messages and public ATC
-  messages that begin with the active callsign.
+  messages that begin with the active callsign, plus confirmed IVAO
+  disconnections that remain unresolved for ten seconds, except while fresh
+  telemetry shows the aircraft stationary at no more than five knots. Each
+  device can optionally confirm IVAO connections with an online alert; SERVER
+  text received during the first two seconds stays in chat without generating
+  Push notifications.
+- In remote mode, each device can also opt into an alert if the simulator PC or
+  its local VoxHF proxy becomes unreachable during a confirmed IVAO session.
 - Controls squawk, STBY/ALT, and IDENT.
 - Shows route METAR and TAF with optional plain-language interpretation.
 - Runs locally without an account, or remotely through a private relay.
@@ -136,6 +145,10 @@ network:
 7. Optionally open **Settings > Notifications** on each device where alerts
    should appear.
 
+The **PC / Proxy Offline Alert** is a separate remote-mode opt-in. Enabling it
+shows a privacy explanation before the local proxy prepares any temporary
+watchdog ticket for the relay.
+
 For Apple devices, follow the complete
 [iPhone/iPad notification procedure](docs/INSTALL_LOCAL.md#enable-notifications-on-iphone-or-ipad).
 
@@ -168,7 +181,8 @@ the process in [SECURITY.md](SECURITY.md).
 Working and tested:
 
 - Local and remote COM, XPDR, messaging, weather, RX, and TX.
-- Multi-device session chat recovery and opt-in Web Push notifications.
+- Multi-device session chat recovery, a synchronized UNICOM reminder, and
+  opt-in Web Push notifications.
 - Multiple browsers connected to one pilot agent.
 - Invite-only accounts, sessions, recovery, admin, and optional passkey MFA.
 - SQLite backup/restore and Docker/Caddy self-hosting.

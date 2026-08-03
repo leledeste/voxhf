@@ -1,6 +1,6 @@
 'use strict';
 
-// Import preview relay users from a .env file into the SQLite relay database.
+// Import file-based relay users from a .env file into the SQLite database.
 //
 // The relay still authenticates from .env by default. After importing, set
 // VOXHF_RELAY_AUTH_MODE=sqlite-fallback to test SQLite tokens with .env
@@ -133,7 +133,7 @@ function parseUsers(raw) {
       userId,
       displayName: userId,
       token,
-      tokenName: 'Relay preview token',
+      tokenName: 'VoxHF agent token',
     });
   }
   return users;

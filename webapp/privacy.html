@@ -39,7 +39,7 @@
 
     <section>
       <h2>Default non-persistence</h2>
-      <p>VoxHF does not intentionally persist voice recordings, permanent chat history, browser push subscriptions on the relay, raw FSD traffic, raw TS2 traffic or full authentication tokens. The running local agent keeps a bounded chat history in memory for refresh recovery and stores enabled-device push subscriptions locally. Audit persistence and application-level IP and user-agent storage are disabled by default.</p>
+      <p>VoxHF does not intentionally persist voice recordings, permanent chat history, browser push subscriptions on the relay, raw FSD traffic, raw TS2 traffic or full authentication tokens. The running local agent keeps a bounded chat history in memory for refresh recovery and stores enabled-device push subscriptions locally. If a user explicitly enables the PC/proxy offline alert, the relay temporarily holds a short-lived Push endpoint and a request already encrypted and signed by the local proxy; it is kept in memory only and removed after use, disarm, replacement, expiry or relay restart. Audit persistence and application-level IP and user-agent storage are disabled by default.</p>
     </section>
 
     <section>

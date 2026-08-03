@@ -1,6 +1,6 @@
 'use strict';
 
-// End-to-end Remote Preview smoke test.
+// End-to-end remote access smoke test (the filename is retained for command compatibility).
 //
 // This starts a real relay process on a temporary localhost port, then simulates
 // one VoxHF agent and one remote browser. It verifies the security boundary
@@ -74,6 +74,7 @@ async function main() {
     await pairBrowser(browser, pairingCode, agentDeviceId);
     await assertBrowserCommandsReachAgent(browser, agent);
     await assertAgentUpdatesReachBrowser(agent, browser);
+    await assertAgentWatchdogIsRelayInternal(agent, browser);
     await assertAgentAudioReachesBrowser(agent, browser);
     await assertBrowserTxAudioReachesAgent(browser, agent);
     await assertPairingCodeCanBeRenewed(agent);
@@ -83,7 +84,7 @@ async function main() {
     browser.close();
   }
 
-  console.log('\nRemote Preview simulation passed.');
+  console.log('\nRemote access simulation passed.');
 }
 
 async function startRelay(port, dataDir) {
@@ -103,6 +104,7 @@ async function startRelay(port, dataDir) {
       VOXHF_RELAY_ALLOW_AGENT_QUERY_TOKEN: 'false',
       VOXHF_RELAY_RECOMMENDED_AGENT_VERSION: '0.1.0',
       VOXHF_RELAY_MINIMUM_AGENT_VERSION: '0.1.0',
+      VOXHF_WATCHDOG_PUSH_ORIGINS: 'https://push.example',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -364,6 +366,19 @@ async function assertBrowserCommandsReachAgent(browser, agent) {
   const commands = [
     [MESSAGE_TYPES.RADIO_SET, { com: 1, freq: '128.350', station: 'LIMC_TWR' }],
     [MESSAGE_TYPES.CHAT_SEND, { recipient: 'LIMC_TWR', text: 'hello remote' }],
+    [MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE, {
+      endpoint: 'https://push.example/subscription/123',
+      p256dh: 'P256DH_123456789',
+      auth: 'AUTH_123456789',
+      deviceId: 'browser-12345678',
+      deviceName: 'iPad Home Screen',
+      appUrl: 'https://app.example/app.html',
+      notifyIvaoConnected: true,
+      notifyAgentOffline: true,
+    }],
+    [MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE, { endpoint: 'https://push.example/subscription/123' }],
+    [MESSAGE_TYPES.UNICOM_TIMER_START, {}],
+    [MESSAGE_TYPES.UNICOM_TIMER_CANCEL, {}],
     [MESSAGE_TYPES.WEATHER_REQUEST, { kind: 'metar', icao: 'LIMC', source: 'panel', role: 'departure' }],
     [MESSAGE_TYPES.ATIS_REQUEST, { callsign: 'LIMC_TWR' }],
     [MESSAGE_TYPES.XPDR_SET_SQUAWK, { code: '2000' }],
@@ -427,6 +442,14 @@ async function assertAgentUpdatesReachBrowser(agent, browser) {
       timestamp: new Date().toISOString(),
       direction: 'incoming',
     }],
+    [MESSAGE_TYPES.UNICOM_TIMER_STATE, {
+      active: true,
+      startedAt: '2026-08-01T12:00:00.000Z',
+      expiresAt: '2026-08-01T12:03:00.000Z',
+    }],
+    [MESSAGE_TYPES.UNICOM_TIMER_EXPIRED, {
+      expiredAt: '2026-08-01T12:03:00.000Z',
+    }],
   ];
 
   for (const [type, payload] of updates) {
@@ -435,6 +458,46 @@ async function assertAgentUpdatesReachBrowser(agent, browser) {
     assert.deepStrictEqual(routed.payload, payload, `${type} update should reach selected browser`);
   }
   console.log('[OK] selected browser received agent updates');
+}
+
+async function assertAgentWatchdogIsRelayInternal(agent, browser) {
+  const sessionId = 'flight-session-test-0001';
+  const batchId = 'watchdog-batch-test-0001';
+  agent.send(MESSAGE_TYPES.AGENT_WATCHDOG_TICKET, {
+    sessionId,
+    batchId,
+    ticket: {
+      deviceId: 'browser-watchdog-0001',
+      endpoint: 'https://push.example/subscription/watchdog',
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      authorization: 'vapid signed-proxy-request-123456789',
+      contentEncoding: 'aes128gcm',
+      body: Buffer.from('encrypted-watchdog-payload').toString('base64url'),
+    },
+  });
+  agent.send(MESSAGE_TYPES.AGENT_WATCHDOG_COMMIT, { sessionId, batchId });
+  agent.send(MESSAGE_TYPES.AGENT_WATCHDOG_DISARM, { sessionId });
+  await agent.sendAndWait(MESSAGE_TYPES.PING, {}, message => message.type === MESSAGE_TYPES.PONG);
+
+  const internalTypes = new Set([
+    MESSAGE_TYPES.AGENT_WATCHDOG_TICKET,
+    MESSAGE_TYPES.AGENT_WATCHDOG_COMMIT,
+    MESSAGE_TYPES.AGENT_WATCHDOG_DISARM,
+    MESSAGE_TYPES.AGENT_WATCHDOG_FIRED,
+  ]);
+  assert.equal(
+    browser.queue.some(message => internalTypes.has(message.type)),
+    false,
+    'agent watchdog messages must never be forwarded to browsers',
+  );
+
+  const rejected = await browser.sendAndWait(
+    MESSAGE_TYPES.AGENT_WATCHDOG_COMMIT,
+    { sessionId, batchId },
+    message => message.type === MESSAGE_TYPES.RELAY_ERROR,
+  );
+  assert.equal(rejected.payload.code, 'invalid-message', 'browsers must not configure the agent watchdog');
+  console.log('[OK] agent watchdog messages remain relay-internal');
 }
 
 async function assertAgentAudioReachesBrowser(agent, browser) {

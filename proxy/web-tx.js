@@ -36,9 +36,6 @@ function createWebTx(options) {
     // Web TX prefers the exact TS2 voice header learned from a real Altitude TX
     // packet. Before any native TX exists, the same session bytes can be
     // derived from TS2 login/setup packets seen during voice-channel join.
-    if (activeTxSession && activeTxSession.clientKey !== clientKey) {
-      invalidateTxSession('TS2 UDP client changed');
-    }
     if (msg.length < 16) return;
 
     if (msg.readUInt16LE(0) !== CLASS_TXVOICE) {
@@ -46,16 +43,14 @@ function createWebTx(options) {
       return;
     }
 
-    const wasReady = Boolean(activeTxSession);
-    activeTxSession = {
+    replaceTxSession({
       clientKey,
       serverSock,
       header: Buffer.from(msg.slice(0, 12)),
       seq: msg.readUInt32LE(12),
       source: 'native',
-    };
+    }, 'native TS2 TX session changed');
     if (diagnostics) logger.log(`[WEBTX] TX voice seed cached key=${clientKey} seq=${activeTxSession.seq}`);
-    if (!wasReady) options.onReady?.();
   }
 
   function deriveTxSessionFromSetup(msg, clientKey, serverSock) {
@@ -81,12 +76,7 @@ function createWebTx(options) {
       return;
     }
 
-    if (activeTxSession?.source === 'native') {
-      invalidateTxSession('TS2 setup session changed', activeTxSession.clientKey);
-    }
-
-    const wasReady = Boolean(activeTxSession);
-    activeTxSession = {
+    replaceTxSession({
       clientKey,
       serverSock,
       header,
@@ -94,9 +84,32 @@ function createWebTx(options) {
       // derived Web TX packet use seq=0, matching native Altitude's first TX.
       seq: DERIVED_INITIAL_SEQ,
       source: 'derived',
-    };
+    }, 'TS2 setup session changed');
     if (diagnostics) logger.log(`[WEBTX] TX voice seed derived key=${clientKey} session=${toHex(sessionBytes)}`);
-    if (!wasReady) options.onReady?.();
+  }
+
+  function replaceTxSession(nextSession, reason) {
+    // Altitude can keep more than one UDP source port active while joining or
+    // maintaining a voice channel. Ignore unrelated packets and replace the
+    // seed only after a valid setup/native packet has been recognized. Keeping
+    // readiness true across that atomic replacement prevents false UI flicker.
+    const previous = activeTxSession;
+    const changed = Boolean(previous) && (
+      previous.clientKey !== nextSession.clientKey
+      || !previous.header.equals(nextSession.header)
+    );
+
+    if (changed) {
+      for (const [ws, tx] of Array.from(webTxBySocket.entries())) {
+        if (!tx.monitorOnly) stop(ws, reason);
+      }
+    }
+
+    activeTxSession = nextSession;
+    if (!previous) {
+      logger.log(`[WEBTX] Ready: ${nextSession.source} TS2 session acquired.`);
+      options.onReady?.();
+    }
   }
 
   function isTxSeedSetupPacket(msg) {
@@ -125,6 +138,7 @@ function createWebTx(options) {
     }
 
     if (!wasReady) return;
+    logger.warn(`[WEBTX] Not ready: ${reason}.`);
     if (diagnostics) logger.log(`[WEBTX] TX voice seed cleared: ${reason}`);
     options.onNotReady?.();
   }

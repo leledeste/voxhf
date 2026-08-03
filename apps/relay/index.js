@@ -1,13 +1,11 @@
 'use strict';
 
 /**
- * Minimal VoxHF Relay skeleton.
+ * VoxHF Remote relay and account service.
  *
- * This is not the production remote relay yet. It provides the safe outer
- * shell: HTTP healthcheck, WebSocket upgrade, origin allowlist, scoped token
- * gate, shared protocol validation, in-memory devices, browser pairing, a
- * narrow message router, and live Remote RX/TX PCM forwarding. Full accounts
- * remain future work; scoped tokens are the first multi-user isolation layer.
+ * The relay exposes health, account, administration, and authenticated
+ * WebSocket endpoints. It routes only allowlisted typed messages and live
+ * Remote RX/TX audio between a user's browsers and selected local agent.
  */
 
 const crypto = require('crypto');
@@ -16,8 +14,11 @@ const http = require('http');
 const path = require('path');
 const { URL } = require('url');
 const WebSocket = require('ws');
-const adminMfa = require('./admin-mfa');
-const LEGAL = require('./legal');
+const { createAccountApi } = require('./account-api');
+const { createAdminApi } = require('./admin-api');
+const { createAgentWatchdog } = require('./agent-watchdog');
+const { isUserId } = require('./credentials');
+const { createRelaySessions } = require('./sessions');
 const { pruneExpiredRelayFiles } = require('./retention');
 const {
   MESSAGE_SOURCES,
@@ -120,6 +121,9 @@ const MAX_ADMIN_ATTEMPTS_PER_WINDOW = clampInteger(process.env.VOXHF_RELAY_MAX_A
 const MAX_AUDIO_FRAME_BYTES = clampInteger(process.env.VOXHF_RELAY_MAX_AUDIO_FRAME_BYTES, 32 * 1024, 320, 64 * 1024);
 const TX_PACKET_MAGIC = Buffer.from('CTX1', 'ascii');
 const MAX_REMOTE_TX_DURATION_MS = clampInteger(process.env.VOXHF_RELAY_MAX_REMOTE_TX_DURATION_MS, 120 * 1000, 5 * 1000, 10 * 60 * 1000);
+const AGENT_HEARTBEAT_INTERVAL_MS = clampInteger(process.env.VOXHF_AGENT_HEARTBEAT_INTERVAL_MS, 10_000, 2000, 60_000);
+const AGENT_WATCHDOG_OFFLINE_DELAY_MS = clampInteger(process.env.VOXHF_AGENT_WATCHDOG_OFFLINE_DELAY_MS, 30_000, 5000, 5 * 60 * 1000);
+const WATCHDOG_PUSH_ORIGINS = parseList(process.env.VOXHF_WATCHDOG_PUSH_ORIGINS || '');
 const MAX_HTTP_RATE_KEYS = Math.max(1000, MAX_CLIENTS * 20);
 const RATE_LIMIT_ERRORS = Object.freeze({
   commands: {
@@ -142,6 +146,20 @@ const pairingCodes = new Map();
 const registrationInvites = new Map();
 const browserAuthorizations = new Map();
 const httpRateStates = new Map();
+const agentWatchdog = createAgentWatchdog({
+  offlineDelayMs: AGENT_WATCHDOG_OFFLINE_DELAY_MS,
+  allowedPushOrigins: WATCHDOG_PUSH_ORIGINS,
+  logger: console,
+  onFired({ deviceKey, sessionId, sent }) {
+    if (sent < 1) return false;
+    const device = devices.get(deviceKey);
+    if (!device || device.ws.readyState !== WebSocket.OPEN) return false;
+    send(device.ws, createRemoteMessage(MESSAGE_TYPES.AGENT_WATCHDOG_FIRED, {
+      sessionId,
+    }, `watchdog-fired-${Date.now().toString(36)}`));
+    return true;
+  },
+});
 loadPersistedPairings();
 runDataMaintenance();
 const maintenanceTimer = setInterval(runDataMaintenance, 24 * 60 * 60 * 1000);
@@ -155,6 +173,8 @@ const BROWSER_TO_AGENT_TYPES = new Set([
   MESSAGE_TYPES.CHAT_HISTORY_REQUEST,
   MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE,
   MESSAGE_TYPES.NOTIFICATION_UNSUBSCRIBE,
+  MESSAGE_TYPES.UNICOM_TIMER_START,
+  MESSAGE_TYPES.UNICOM_TIMER_CANCEL,
   MESSAGE_TYPES.WEATHER_REQUEST,
   MESSAGE_TYPES.ATIS_REQUEST,
   MESSAGE_TYPES.XPDR_SET_SQUAWK,
@@ -175,7 +195,91 @@ const AGENT_TO_BROWSER_TYPES = new Set([
   MESSAGE_TYPES.CHAT_MESSAGE,
   MESSAGE_TYPES.CHAT_HISTORY,
   MESSAGE_TYPES.NOTIFICATION_STATE,
+  MESSAGE_TYPES.UNICOM_TIMER_STATE,
+  MESSAGE_TYPES.UNICOM_TIMER_EXPIRED,
 ]);
+
+const AGENT_WATCHDOG_TYPES = new Set([
+  MESSAGE_TYPES.AGENT_WATCHDOG_TICKET,
+  MESSAGE_TYPES.AGENT_WATCHDOG_COMMIT,
+  MESSAGE_TYPES.AGENT_WATCHDOG_DISARM,
+]);
+
+const relaySessions = createRelaySessions({
+  authMode: RELAY_AUTH_MODE,
+  envAuthMode: AUTH_MODE_ENV,
+  accountCookieName: ACCOUNT_SESSION_COOKIE,
+  accountTtlMs: ACCOUNT_SESSION_TTL_MS,
+  adminCookieName: ADMIN_SESSION_COOKIE,
+  adminTtlMs: ADMIN_SESSION_TTL_MS,
+  adminIdleTtlMs: ADMIN_SESSION_IDLE_TTL_MS,
+  storeMetadata: STORE_SESSION_METADATA,
+  openDatabase: openAdminDatabase,
+  generateToken: generateRelayToken,
+});
+const {
+  findRelayUserBySession,
+} = relaySessions;
+
+const handleAccountApi = createAccountApi({
+  authMode: RELAY_AUTH_MODE,
+  envAuthMode: AUTH_MODE_ENV,
+  registrationEnabled: ENABLE_ACCOUNT_REGISTRATION,
+  registrationRequiresInvite: REQUIRE_REGISTRATION_INVITE,
+  maxAuthAttempts: MAX_AUTH_ATTEMPTS_PER_WINDOW,
+  sessions: relaySessions,
+  openDatabase: openAdminDatabase,
+  generateToken: generateRelayToken,
+  validateRequest: validateApiRequest,
+  sendJson,
+  allowAttempt: allowHttpAttempt,
+  clearAttempts: clearHttpAttempts,
+  readJsonBody,
+  hasRegistrationInvite,
+  consumeRegistrationInvite,
+  insertAuditEvent: insertAccountAuditEvent,
+  reloadRelayUsers,
+  closeBrowserSessions: closeBrowserSessionClients,
+  closeAgentClients: closeAgentClientsForUser,
+});
+
+const handleAdminApi = createAdminApi({
+  config: {
+    authMode: RELAY_AUTH_MODE,
+    envAuthMode: AUTH_MODE_ENV,
+    registrationEnabled: ENABLE_ACCOUNT_REGISTRATION,
+    registrationRequiresInvite: REQUIRE_REGISTRATION_INVITE,
+    persistAudit: PERSIST_AUDIT,
+    auditRetentionDays: AUDIT_RETENTION_DAYS,
+    storeSessionMetadata: STORE_SESSION_METADATA,
+    maxAdminAttempts: MAX_ADMIN_ATTEMPTS_PER_WINDOW,
+    accountRecoveryTtlMs: ACCOUNT_RECOVERY_TTL_MS,
+    adminTokenHash: ADMIN_TOKEN_HASH,
+    allowedOrigins: ALLOWED_ORIGINS,
+    webauthnRpId: WEBAUTHN_RP_ID,
+    webauthnRpName: WEBAUTHN_RP_NAME,
+    mfaChallengeTtlMs: ADMIN_MFA_CHALLENGE_TTL_MS,
+  },
+  sessions: relaySessions,
+  relayUsers,
+  registrationInvites,
+  openDatabase: openAdminDatabase,
+  generateRelayToken,
+  validateApiRequest,
+  sendJson,
+  allowHttpAttempt,
+  clearHttpAttempts,
+  readJsonBody,
+  authorizeAdminTokenRequest,
+  createRegistrationInvite,
+  purgeExpiredRegistrationInvites,
+  listAdminRelayDevices,
+  listAdminRelayPairings,
+  revokeBrowserAuthorizationByHash,
+  disconnectRevokedPairingClients,
+  reloadRelayUsers,
+  closeClientsForUser,
+});
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
@@ -262,6 +366,7 @@ wss.on('connection', (ws, req, decision) => {
     connectedAt: Date.now(),
     remoteAddress: req.socket.remoteAddress || '',
     rate: createRateState(),
+    heartbeatAlive: true,
   };
   clients.set(ws, client);
 
@@ -276,6 +381,7 @@ wss.on('connection', (ws, req, decision) => {
   }, `identity-${client.id}`));
 
   ws.on('message', (data, isBinary) => {
+    client.heartbeatAlive = true;
     if (isBinary) {
       handleBinaryMessage(ws, client, data);
       return;
@@ -296,12 +402,35 @@ wss.on('connection', (ws, req, decision) => {
     handleMessage(ws, client, result.message);
   });
 
+  ws.on('pong', () => {
+    client.heartbeatAlive = true;
+    const device = client.deviceKey ? devices.get(client.deviceKey) : null;
+    if (device) device.lastSeenAt = Date.now();
+  });
+
   ws.on('close', () => removeClient(ws));
   ws.on('error', () => removeClient(ws));
 });
 
+const agentHeartbeatTimer = setInterval(() => {
+  for (const [ws, client] of clients.entries()) {
+    if (client.source !== MESSAGE_SOURCES.AGENT || ws.readyState !== WebSocket.OPEN) continue;
+    if (client.heartbeatAlive === false) {
+      ws.terminate();
+      continue;
+    }
+    client.heartbeatAlive = false;
+    try {
+      ws.ping();
+    } catch (_) {
+      ws.terminate();
+    }
+  }
+}, AGENT_HEARTBEAT_INTERVAL_MS);
+agentHeartbeatTimer.unref?.();
+
 function handleBinaryMessage(ws, client, data) {
-  // Remote audio is the only binary path in the preview relay. Agent binary is
+  // Remote audio is the only binary path in the relay. Agent binary is
   // live RX PCM for paired browsers. Browser binary is TX microphone PCM and is
   // accepted only during an explicit tx.start/tx.stop window.
   const frame = Buffer.isBuffer(data) ? data : Buffer.from(data);
@@ -441,6 +570,11 @@ function handleMessage(ws, client, message) {
     return;
   }
 
+  if (AGENT_WATCHDOG_TYPES.has(message.type)) {
+    handleAgentWatchdogMessage(ws, client, message);
+    return;
+  }
+
   if (BROWSER_TO_AGENT_TYPES.has(message.type)) {
     routeBrowserCommand(ws, client, message);
     return;
@@ -455,1045 +589,6 @@ function handleMessage(ws, client, message) {
     code: 'not-routed',
     message: `validated ${message.type} from ${client.source}, routing is not implemented yet`,
   }));
-}
-
-async function handleAccountApi(req, res, url) {
-  const requestCheck = validateApiRequest(req);
-  if (!requestCheck.ok) {
-    return sendJson(req, res, requestCheck.status, {
-      ok: false,
-      code: requestCheck.code,
-      error: requestCheck.error,
-    });
-  }
-
-  if (RELAY_AUTH_MODE === AUTH_MODE_ENV) {
-    return sendJson(req, res, 409, {
-      ok: false,
-      code: 'account_mode_unavailable',
-      error: 'account login requires sqlite-fallback or sqlite auth mode',
-    });
-  }
-
-  if (req.method === 'GET' && url.pathname === '/account/api/status') {
-    const session = getAccountSession(req);
-    return sendJson(req, res, 200, {
-      ok: true,
-      registrationEnabled: ENABLE_ACCOUNT_REGISTRATION,
-      registrationRequiresInvite: ENABLE_ACCOUNT_REGISTRATION && REQUIRE_REGISTRATION_INVITE,
-      legal: LEGAL,
-      authenticated: Boolean(session),
-      user: session ? publicAccountUser(session) : null,
-    });
-  }
-
-  if (req.method === 'GET' && url.pathname === '/account/api/me') {
-    const session = getAccountSession(req);
-    if (!session) return sendJson(req, res, 401, { ok: false, code: 'not_authenticated', error: 'not authenticated' });
-    return sendJson(req, res, 200, { ok: true, user: publicAccountUser(session) });
-  }
-
-  if (req.method === 'GET' && url.pathname === '/account/api/sessions') {
-    const session = getAccountSession(req);
-    if (!session) return sendJson(req, res, 401, { ok: false, code: 'not_authenticated', error: 'not authenticated' });
-    return withAccountDatabase((db) => sendJson(req, res, 200, {
-      ok: true,
-      sessions: require('./db').listBrowserSessions(db, session.userId).map((item) => ({
-        ...item,
-        current: item.sessionId === session.sessionId,
-      })),
-    }));
-  }
-
-  const accountSessionAction = url.pathname.match(/^\/account\/api\/sessions\/([^/]+)\/revoke$/);
-  if (req.method === 'POST' && accountSessionAction) {
-    const session = getAccountSession(req);
-    if (!session) return sendJson(req, res, 401, { ok: false, code: 'not_authenticated', error: 'not authenticated' });
-    const sessionId = decodeURIComponent(accountSessionAction[1]);
-    return withAccountDatabase((db) => {
-      const result = require('./db').revokeBrowserSessionById(db, session.userId, sessionId);
-      if (!result.count) return sendJson(req, res, 404, { ok: false, code: 'session_not_found', error: 'session not found' });
-      insertAccountAuditEvent(db, req, {
-        eventType: 'account.session_revoked',
-        userId: session.userId,
-        metadata: { sessionId, current: sessionId === session.sessionId },
-      });
-      closeBrowserSessionClients(session.userId, [sessionId], 'browser session revoked');
-      const headers = sessionId === session.sessionId ? clearSessionCookieHeaders(req) : {};
-      return sendJson(req, res, 200, { ok: true, count: result.count, current: sessionId === session.sessionId }, headers);
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/account/api/sessions/revoke-others') {
-    const session = getAccountSession(req);
-    if (!session) return sendJson(req, res, 401, { ok: false, code: 'not_authenticated', error: 'not authenticated' });
-    return withAccountDatabase((db) => {
-      const result = require('./db').revokeOtherBrowserSessions(db, session.userId, session.sessionId);
-      insertAccountAuditEvent(db, req, {
-        eventType: 'account.sessions_revoked_others',
-        userId: session.userId,
-        metadata: { count: result.count },
-      });
-      closeBrowserSessionClients(session.userId, result.sessionIds, 'browser session revoked');
-      return sendJson(req, res, 200, { ok: true, count: result.count });
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/account/api/register') {
-    if (!allowHttpAttempt(req, res, 'registration', MAX_AUTH_ATTEMPTS_PER_WINDOW)) return;
-    if (!ENABLE_ACCOUNT_REGISTRATION) {
-      return sendJson(req, res, 403, { ok: false, code: 'registration_disabled', error: 'registration is disabled' });
-    }
-
-    const body = await readJsonBody(req);
-    if (REQUIRE_REGISTRATION_INVITE && !hasRegistrationInvite(body.inviteCode)) {
-      return sendJson(req, res, 403, {
-        ok: false,
-        code: 'invalid_invite',
-        error: 'a valid registration invite is required',
-      });
-    }
-    if (!hasCurrentLegalAcceptance(body)) {
-      return sendJson(req, res, 400, {
-        ok: false,
-        code: 'legal_acceptance_required',
-        error: 'the current terms and privacy notice must be accepted',
-        legal: LEGAL,
-      });
-    }
-    const userId = requireAccountUserId(body.userId);
-    const displayName = requireAccountDisplayName(body.displayName || userId);
-    const password = requireAccountPassword(body.password);
-    const agentToken = generateRelayToken();
-    const passwordHash = hashPassword(password);
-
-    return withAccountDatabase((db) => {
-      if (require('./db').getRelayUser(db, userId)) {
-        return sendJson(req, res, 409, {
-          ok: false,
-          code: 'username_taken',
-          error: 'username already exists',
-        });
-      }
-
-      const account = require('./db').createRelayAccount(db, {
-        userId,
-        displayName,
-        passwordHash,
-        token: agentToken,
-        tokenName: 'Relay preview token',
-        termsVersion: LEGAL.termsVersion,
-        privacyVersion: LEGAL.privacyVersion,
-        legalAcceptanceMethod: 'registration',
-      });
-      if (REQUIRE_REGISTRATION_INVITE) consumeRegistrationInvite(body.inviteCode);
-      const session = createAccountSession(db, req, userId);
-      insertAccountAuditEvent(db, req, {
-        eventType: 'account.registered',
-        userId,
-        metadata: { tokenPrefix: account.tokenPrefix },
-      });
-      reloadRelayUsers();
-      clearHttpAttempts(req, 'registration');
-      return sendJson(req, res, 201, {
-        ok: true,
-        user: publicAccountUser(session),
-        agentToken,
-        tokenPrefix: account.tokenPrefix,
-      }, sessionCookieHeaders(req, session.sessionToken, session.expiresAt));
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/account/api/login') {
-    if (!allowHttpAttempt(req, res, 'login', MAX_AUTH_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    const userId = String(body.userId || '').trim().toLowerCase();
-    const password = String(body.password || '');
-    if (!isUserId(userId) || password.length < 1 || password.length > 256) {
-      return sendJson(req, res, 401, {
-        ok: false,
-        code: 'invalid_credentials',
-        error: 'invalid username or password',
-      });
-    }
-
-    return withAccountDatabase((db) => {
-      const user = require('./db').getRelayUserCredentials(db, userId);
-      if (!user || user.disabledAt || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
-        return sendJson(req, res, 401, { ok: false, code: 'invalid_credentials', error: 'invalid username or password' });
-      }
-
-      const session = createAccountSession(db, req, user.userId);
-      insertAccountAuditEvent(db, req, {
-        eventType: 'account.login',
-        userId: user.userId,
-      });
-      clearHttpAttempts(req, 'login');
-      return sendJson(req, res, 200, {
-        ok: true,
-        user: publicAccountUser(session),
-      }, sessionCookieHeaders(req, session.sessionToken, session.expiresAt));
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/account/api/password/change') {
-    const session = getAccountSession(req);
-    if (!session) return sendJson(req, res, 401, { ok: false, code: 'not_authenticated', error: 'not authenticated' });
-    if (!allowHttpAttempt(req, res, 'password-change', MAX_AUTH_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    const currentPassword = String(body.currentPassword || '');
-    const newPassword = requireAccountPassword(body.newPassword);
-    const newPasswordHash = hashPassword(newPassword);
-    return withAccountDatabase((db) => {
-      const account = require('./db').getRelayUserCredentials(db, session.userId);
-      if (!account?.passwordHash || !verifyPassword(currentPassword, account.passwordHash)) {
-        return sendJson(req, res, 401, { ok: false, code: 'invalid_credentials', error: 'invalid current password' });
-      }
-      require('./db').setRelayUserPassword(db, session.userId, newPasswordHash);
-      const revoked = require('./db').revokeOtherBrowserSessions(db, session.userId, session.sessionId);
-      insertAccountAuditEvent(db, req, {
-        eventType: 'account.password_changed',
-        userId: session.userId,
-        metadata: { revokedSessions: revoked.count },
-      });
-      closeBrowserSessionClients(session.userId, revoked.sessionIds, 'password changed');
-      clearHttpAttempts(req, 'password-change');
-      return sendJson(req, res, 200, { ok: true, revokedSessions: revoked.count });
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/account/api/password/recover') {
-    if (!allowHttpAttempt(req, res, 'password-recovery', MAX_AUTH_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    const userId = requireAccountUserId(body.userId);
-    const recoveryCode = normalizeAccountRecoveryCode(body.recoveryCode);
-    const newPassword = requireAccountPassword(body.newPassword);
-    const newPasswordHash = hashPassword(newPassword);
-    return withAccountDatabase((db) => {
-      const account = require('./db').getRelayUserCredentials(db, userId);
-      const invalid = () => sendJson(req, res, 401, {
-        ok: false,
-        code: 'invalid_recovery_code',
-        error: 'invalid or expired recovery code',
-      });
-      if (!account || account.disabledAt || !recoveryCode) return invalid();
-      const consumed = require('./db').consumeAccountRecoveryCode(db, {
-        userId,
-        codeHash: require('./db').hashToken(recoveryCode),
-      });
-      if (!consumed.count) return invalid();
-
-      require('./db').setRelayUserPassword(db, userId, newPasswordHash);
-      const revoked = require('./db').revokeAllBrowserSessions(db, userId);
-      closeBrowserSessionClients(userId, revoked.sessionIds, 'account recovered');
-      const session = createAccountSession(db, req, userId);
-      insertAccountAuditEvent(db, req, {
-        eventType: 'account.password_recovered',
-        userId,
-        metadata: { revokedSessions: revoked.count },
-      });
-      clearHttpAttempts(req, 'password-recovery');
-      return sendJson(req, res, 200, {
-        ok: true,
-        user: publicAccountUser(session),
-      }, sessionCookieHeaders(req, session.sessionToken, session.expiresAt));
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/account/api/logout') {
-    const token = getSessionTokenFromRequest(req);
-    const session = getAccountSession(req);
-    if (token) {
-      withAccountDatabase((db) => {
-        require('./db').revokeBrowserSession(db, token);
-      });
-    }
-    if (session) closeBrowserSessionClients(session.userId, [session.sessionId], 'account logged out');
-    return sendJson(req, res, 200, { ok: true }, clearSessionCookieHeaders(req));
-  }
-
-  if (req.method === 'POST' && url.pathname === '/account/api/agent-token/rotate') {
-    const session = getAccountSession(req);
-    if (!session) return sendJson(req, res, 401, { ok: false, code: 'not_authenticated', error: 'not authenticated' });
-
-    return withAccountDatabase((db) => {
-      const agentToken = generateRelayToken();
-      const result = require('./db').importRelayUserToken(db, {
-        userId: session.userId,
-        displayName: session.userName || session.userId,
-        token: agentToken,
-        tokenName: 'Relay preview token',
-      });
-      insertAccountAuditEvent(db, req, {
-        eventType: 'account.agent_token_rotated',
-        userId: session.userId,
-        metadata: { tokenPrefix: result.tokenPrefix },
-      });
-      reloadRelayUsers();
-      closeAgentClientsForUser(session.userId, 'relay token rotated');
-      return sendJson(req, res, 200, {
-        ok: true,
-        agentToken,
-        tokenPrefix: result.tokenPrefix,
-      });
-    });
-  }
-
-  return sendJson(req, res, 404, { ok: false, error: 'not found' });
-}
-
-async function handleAdminApi(req, res, url) {
-  const requestCheck = validateApiRequest(req);
-  if (!requestCheck.ok) {
-    return sendJson(req, res, requestCheck.status, {
-      ok: false,
-      code: requestCheck.code,
-      error: requestCheck.error,
-    });
-  }
-
-  if (url.pathname.startsWith('/admin/api/auth/')) {
-    return handleAdminAuthApi(req, res, url);
-  }
-
-  const admin = authorizeAdminRequest(req);
-  if (!admin.ok) {
-    if (!allowHttpAttempt(req, res, 'admin', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    return sendJson(req, res, admin.status, { ok: false, error: admin.error });
-  }
-  clearHttpAttempts(req, 'admin');
-  req.voxhfAdmin = admin;
-
-  if (req.method === 'GET' && url.pathname === '/admin/api/status') {
-    purgeExpiredRegistrationInvites();
-    return sendJson(req, res, 200, {
-      ok: true,
-      authMode: RELAY_AUTH_MODE,
-      sqliteAdmin: RELAY_AUTH_MODE !== AUTH_MODE_ENV,
-      users: relayUsers.size,
-      database: defaultRelayDatabasePath(),
-      registrationEnabled: ENABLE_ACCOUNT_REGISTRATION,
-      registrationRequiresInvite: REQUIRE_REGISTRATION_INVITE,
-      activeRegistrationInvites: registrationInvites.size,
-      auditEnabled: PERSIST_AUDIT,
-      auditRetentionDays: AUDIT_RETENTION_DAYS,
-      sessionMetadataEnabled: STORE_SESSION_METADATA,
-      adminSession: admin.kind === 'session',
-      admin: admin.kind === 'session' ? publicAdminAccount(admin) : null,
-    });
-  }
-
-  if (RELAY_AUTH_MODE === AUTH_MODE_ENV) {
-    return sendJson(req, res, 409, {
-      ok: false,
-      error: 'sqlite admin is disabled while VOXHF_RELAY_AUTH_MODE=env',
-    });
-  }
-
-  if (url.pathname === '/admin/api/mfa' || url.pathname.startsWith('/admin/api/mfa/')) {
-    if (admin.kind !== 'session') {
-      return sendJson(req, res, 403, {
-        ok: false,
-        code: 'admin_session_required',
-        error: 'login with an admin account to manage MFA',
-      });
-    }
-    return handleAdminMfaApi(req, res, url, admin);
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/registration-invites') {
-    if (!ENABLE_ACCOUNT_REGISTRATION || !REQUIRE_REGISTRATION_INVITE) {
-      return sendJson(req, res, 409, {
-        ok: false,
-        error: 'invite-only registration is not enabled',
-      });
-    }
-    const invite = createRegistrationInvite();
-    withAdminDatabase((db) => insertAdminAuditEvent(db, req, {
-      eventType: 'registration.invite_created',
-      metadata: { expiresAt: invite.expiresAt },
-    }));
-    return sendJson(req, res, 201, { ok: true, ...invite });
-  }
-
-  if (req.method === 'GET' && url.pathname === '/admin/api/sessions') {
-    if (admin.kind !== 'session') {
-      return sendJson(req, res, 403, {
-        ok: false,
-        code: 'admin_session_required',
-        error: 'login with an admin account to manage sessions',
-      });
-    }
-    return withAdminDatabase((db) => sendJson(req, res, 200, {
-      ok: true,
-      sessions: require('./db').listAdminSessions(db, admin.adminId).map((session) => ({
-        ...session,
-        current: session.sessionId === admin.sessionId,
-      })),
-    }));
-  }
-
-  const adminSessionAction = url.pathname.match(/^\/admin\/api\/sessions\/([^/]+)\/revoke$/);
-  if (req.method === 'POST' && adminSessionAction) {
-    if (admin.kind !== 'session') {
-      return sendJson(req, res, 403, { ok: false, code: 'admin_session_required', error: 'admin session required' });
-    }
-    const sessionId = decodeURIComponent(adminSessionAction[1]);
-    return withAdminDatabase((db) => {
-      const result = require('./db').revokeAdminSessionById(db, admin.adminId, sessionId);
-      if (!result.count) return sendJson(req, res, 404, { ok: false, error: 'session not found' });
-      insertAdminAuditEvent(db, req, {
-        eventType: 'admin.session_revoked',
-        metadata: { sessionId, current: sessionId === admin.sessionId },
-      });
-      const headers = sessionId === admin.sessionId ? clearAdminSessionCookieHeaders(req) : {};
-      return sendJson(req, res, 200, { ok: true, count: result.count }, headers);
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/sessions/revoke-others') {
-    if (admin.kind !== 'session') {
-      return sendJson(req, res, 403, { ok: false, code: 'admin_session_required', error: 'admin session required' });
-    }
-    return withAdminDatabase((db) => {
-      const result = require('./db').revokeOtherAdminSessions(db, admin.adminId, admin.sessionId);
-      insertAdminAuditEvent(db, req, {
-        eventType: 'admin.sessions_revoked_others',
-        metadata: { count: result.count },
-      });
-      return sendJson(req, res, 200, { ok: true, count: result.count });
-    });
-  }
-
-  if (req.method === 'GET' && url.pathname === '/admin/api/users') {
-    return withAdminDatabase((db) => sendJson(req, res, 200, {
-      ok: true,
-      users: listAdminRelayUsers(db),
-    }));
-  }
-
-  if (req.method === 'GET' && url.pathname === '/admin/api/devices') {
-    return withAdminDatabase((db) => sendJson(req, res, 200, {
-      ok: true,
-      devices: listAdminRelayDevices(db),
-    }));
-  }
-
-  if (req.method === 'GET' && url.pathname === '/admin/api/pairings') {
-    return withAdminDatabase((db) => sendJson(req, res, 200, {
-      ok: true,
-      pairings: listAdminRelayPairings(db),
-    }));
-  }
-
-  if (req.method === 'GET' && url.pathname === '/admin/api/audit') {
-    return withAdminDatabase((db) => sendJson(req, res, 200, {
-      ok: true,
-      enabled: PERSIST_AUDIT,
-      events: PERSIST_AUDIT ? listAdminAuditEvents(db) : [],
-    }));
-  }
-
-  const pairingAction = url.pathname.match(/^\/admin\/api\/pairings\/([^/]+)\/revoke$/);
-  if (req.method === 'POST' && pairingAction) {
-    const pairingId = decodeURIComponent(pairingAction[1]);
-    return withAdminDatabase((db) => {
-      const result = revokeAdminRelayPairing(db, pairingId);
-      if (!result) return sendJson(req, res, 404, { ok: false, error: 'pairing not found' });
-      insertAdminAuditEvent(db, req, {
-        eventType: 'pairing.revoked_admin',
-        userId: result.userId,
-        targetAgentId: result.deviceId,
-        targetBrowserPairingId: result.pairingId,
-        metadata: { deviceId: result.deviceId },
-      });
-      revokeBrowserAuthorizationByHash(result.userId, result.browserIdHash, result.deviceId);
-      disconnectRevokedPairingClients(result.userId, result.browserIdHash, result.deviceId);
-      return sendJson(req, res, 200, { ok: true, action: 'revoked', count: result.count });
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/users') {
-    const body = await readJsonBody(req);
-    const userId = requireAdminUserId(body.userId);
-    return withAdminDatabase((db) => {
-      const existing = getAdminRelayUser(db, userId);
-      if (existing) return sendJson(req, res, 409, { ok: false, error: 'user already exists' });
-
-      const token = generateRelayToken();
-      const result = importAdminRelayUserToken(db, {
-        userId,
-        displayName: String(body.displayName || userId).trim() || userId,
-        token,
-      });
-      insertAdminAuditEvent(db, req, {
-        eventType: 'admin.user_created',
-        userId,
-        metadata: { targetUserId: userId },
-      });
-      reloadRelayUsers();
-      sendJson(req, res, 201, { ok: true, action: result.action, userId, token });
-    });
-  }
-
-  const userAction = url.pathname.match(/^\/admin\/api\/users\/([^/]+)\/(rotate|revoke|password-reset|disable|enable|delete)$/);
-  if (req.method === 'POST' && userAction) {
-    const userId = requireAdminUserId(decodeURIComponent(userAction[1]));
-    const action = userAction[2];
-    return withAdminDatabase((db) => {
-      const existing = getAdminRelayUser(db, userId);
-      if (!existing) return sendJson(req, res, 404, { ok: false, error: 'user not found' });
-
-      if (action === 'rotate') {
-        const token = generateRelayToken();
-        const result = importAdminRelayUserToken(db, {
-          userId,
-          displayName: existing.displayName || userId,
-          token,
-        });
-        insertAdminAuditEvent(db, req, {
-          eventType: 'admin.token_rotated',
-          userId,
-          metadata: { targetUserId: userId },
-        });
-        reloadRelayUsers();
-        closeClientsForUser(userId, 'relay token rotated');
-        return sendJson(req, res, 200, { ok: true, action: result.action, userId, token });
-      }
-
-      if (action === 'revoke') {
-        const result = revokeAdminRelayUserTokens(db, { userId });
-        insertAdminAuditEvent(db, req, {
-          eventType: 'admin.tokens_revoked',
-          userId,
-          metadata: { targetUserId: userId, count: result.count },
-        });
-        reloadRelayUsers();
-        closeClientsForUser(userId, 'relay token revoked');
-        return sendJson(req, res, 200, { ok: true, action: result.action, userId, count: result.count });
-      }
-
-      if (action === 'password-reset') {
-        const code = generateAccountRecoveryCode();
-        const expiresAt = new Date(Date.now() + ACCOUNT_RECOVERY_TTL_MS).toISOString();
-        require('./db').createAccountRecoveryCode(db, {
-          userId,
-          codeHash: require('./db').hashToken(normalizeAccountRecoveryCode(code)),
-          expiresAt,
-        });
-        insertAdminAuditEvent(db, req, {
-          eventType: 'admin.password_recovery_created',
-          userId,
-          metadata: { targetUserId: userId, expiresAt },
-        });
-        return sendJson(req, res, 201, { ok: true, action, userId, code, expiresAt });
-      }
-
-      if (action === 'disable' || action === 'enable') {
-        const disabled = action === 'disable';
-        const result = setAdminRelayUserDisabled(db, userId, disabled);
-        insertAdminAuditEvent(db, req, {
-          eventType: disabled ? 'admin.user_disabled' : 'admin.user_enabled',
-          userId,
-          metadata: { targetUserId: userId },
-        });
-        reloadRelayUsers();
-        if (disabled) closeClientsForUser(userId, 'relay user disabled');
-        return sendJson(req, res, 200, { ok: true, action: result.action, userId });
-      }
-
-      if (action === 'delete') {
-        const pairings = require('./db').listActiveBrowserPairings(db)
-          .filter((pairing) => pairing.userId === userId);
-        insertAdminAuditEvent(db, req, {
-          eventType: 'admin.user_deleted',
-          userId,
-          metadata: { targetUserId: userId, activePairingCount: pairings.length },
-        });
-        const result = deleteAdminRelayUser(db, userId);
-        reloadRelayUsers();
-        for (const pairing of pairings) {
-          revokeBrowserAuthorizationByHash(pairing.userId, pairing.browserIdHash, pairing.deviceId);
-        }
-        closeClientsForUser(userId, 'relay user deleted');
-        return sendJson(req, res, 200, { ok: true, action: result.action, userId, count: result.count });
-      }
-
-      return sendJson(req, res, 400, { ok: false, error: 'unknown action' });
-    });
-  }
-
-  return sendJson(req, res, 404, { ok: false, error: 'not found' });
-}
-
-async function handleAdminMfaApi(req, res, url, admin) {
-  const dbApi = require('./db');
-
-  if (req.method === 'GET' && url.pathname === '/admin/api/mfa') {
-    return withAdminDatabase((db) => sendJson(req, res, 200, {
-      ok: true,
-      enabled: dbApi.listAdminPasskeys(db, admin.adminId).length > 0,
-      supported: true,
-      passkeys: publicAdminPasskeys(dbApi.listAdminPasskeys(db, admin.adminId)),
-      recoveryCodesRemaining: dbApi.countAdminRecoveryCodes(db, admin.adminId),
-    }));
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/mfa/passkeys/options') {
-    if (!allowHttpAttempt(req, res, 'admin-mfa-manage', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    const name = requirePasskeyName(body.name);
-
-    return withAdminDatabaseAsync(async (db) => {
-      requireCurrentAdminPassword(db, admin, body.currentPassword);
-      const account = dbApi.getAdminAccountCredentialsById(db, admin.adminId);
-      const passkeys = dbApi.listAdminPasskeys(db, admin.adminId);
-      let context;
-      try {
-        context = adminMfa.resolveWebAuthnContext(req, {
-          allowedOrigins: ALLOWED_ORIGINS,
-          rpId: WEBAUTHN_RP_ID,
-          rpName: WEBAUTHN_RP_NAME,
-        });
-      } catch (err) {
-        throw apiError(400, 'webauthn_configuration_error', err.message);
-      }
-
-      const options = await adminMfa.createRegistrationOptions(account, passkeys, context);
-      const flowToken = generateRelayToken();
-      const expiresAt = new Date(Date.now() + ADMIN_MFA_CHALLENGE_TTL_MS).toISOString();
-      dbApi.createAdminMfaChallenge(db, {
-        adminId: admin.adminId,
-        flowToken,
-        purpose: 'registration',
-        challenge: options.challenge,
-        origin: context.origin,
-        rpId: context.rpId,
-        sessionId: admin.sessionId,
-        expiresAt,
-      });
-      clearHttpAttempts(req, 'admin-mfa-manage');
-      return sendJson(req, res, 200, { ok: true, flowToken, expiresAt, name, options });
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/mfa/passkeys/complete') {
-    if (!allowHttpAttempt(req, res, 'admin-mfa-manage', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    const flowToken = String(body.flowToken || '').trim();
-    const name = requirePasskeyName(body.name);
-    const credential = body.credential;
-    if (!isTokenLike(flowToken) || !credential?.id) {
-      throw apiError(400, 'invalid_mfa_response', 'passkey response is incomplete');
-    }
-
-    return withAdminDatabaseAsync(async (db) => {
-      const challenge = dbApi.consumeAdminMfaChallenge(db, {
-        flowToken,
-        purpose: 'registration',
-        adminId: admin.adminId,
-        sessionId: admin.sessionId,
-      });
-      if (!challenge) throw apiError(401, 'mfa_challenge_expired', 'Passkey challenge expired; try again');
-      if (dbApi.getAdminPasskey(db, admin.adminId, credential.id)) {
-        throw apiError(409, 'passkey_exists', 'this passkey is already registered');
-      }
-
-      let registrationInfo;
-      try {
-        registrationInfo = await adminMfa.completeRegistration(
-          credential,
-          challenge.challenge,
-          { origin: challenge.origin, rpId: challenge.rpId }
-        );
-      } catch (_) {
-        throw apiError(400, 'invalid_mfa_response', 'passkey registration failed');
-      }
-
-      const wasEnabled = dbApi.listAdminPasskeys(db, admin.adminId).length > 0;
-      dbApi.createAdminPasskey(db, {
-        adminId: admin.adminId,
-        credentialId: registrationInfo.credential.id,
-        name,
-        webauthnUserId: adminMfa.webAuthnUserId(admin.adminId),
-        publicKey: registrationInfo.credential.publicKey,
-        counter: registrationInfo.credential.counter,
-        transports: registrationInfo.credential.transports || credential.response?.transports || [],
-        deviceType: registrationInfo.credentialDeviceType,
-        backedUp: registrationInfo.credentialBackedUp,
-      });
-
-      let recoveryCodes = [];
-      if (!wasEnabled) {
-        recoveryCodes = adminMfa.generateRecoveryCodes();
-        dbApi.replaceAdminRecoveryCodes(
-          db,
-          admin.adminId,
-          recoveryCodes.map((code) => adminMfa.hashRecoveryCode(admin.adminId, code))
-        );
-      }
-      req.voxhfAdmin = admin;
-      insertAdminAuditEvent(db, req, {
-        eventType: wasEnabled ? 'admin.passkey_added' : 'admin.mfa_enabled',
-        metadata: { credentialId: registrationInfo.credential.id, name },
-      });
-      clearHttpAttempts(req, 'admin-mfa-manage');
-      return sendJson(req, res, 201, {
-        ok: true,
-        enabled: true,
-        passkeys: publicAdminPasskeys(dbApi.listAdminPasskeys(db, admin.adminId)),
-        recoveryCodesRemaining: dbApi.countAdminRecoveryCodes(db, admin.adminId),
-        recoveryCodes,
-      });
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/mfa/recovery-codes/regenerate') {
-    if (!allowHttpAttempt(req, res, 'admin-mfa-manage', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    return withAdminDatabase((db) => {
-      requireCurrentAdminPassword(db, admin, body.currentPassword);
-      if (!dbApi.listAdminPasskeys(db, admin.adminId).length) {
-        throw apiError(409, 'mfa_not_enabled', 'add a passkey before generating recovery codes');
-      }
-      const recoveryCodes = adminMfa.generateRecoveryCodes();
-      dbApi.replaceAdminRecoveryCodes(
-        db,
-        admin.adminId,
-        recoveryCodes.map((code) => adminMfa.hashRecoveryCode(admin.adminId, code))
-      );
-      req.voxhfAdmin = admin;
-      insertAdminAuditEvent(db, req, { eventType: 'admin.recovery_codes_regenerated' });
-      clearHttpAttempts(req, 'admin-mfa-manage');
-      return sendJson(req, res, 200, {
-        ok: true,
-        recoveryCodes,
-        recoveryCodesRemaining: recoveryCodes.length,
-      });
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/mfa/disable') {
-    if (!allowHttpAttempt(req, res, 'admin-mfa-manage', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    return withAdminDatabase((db) => {
-      requireCurrentAdminPassword(db, admin, body.currentPassword);
-      const cleared = dbApi.clearAdminMfa(db, admin.adminId);
-      const revoked = dbApi.revokeOtherAdminSessions(db, admin.adminId, admin.sessionId);
-      req.voxhfAdmin = admin;
-      insertAdminAuditEvent(db, req, {
-        eventType: 'admin.mfa_disabled',
-        metadata: { passkeys: cleared.passkeys, revokedSessions: revoked.count },
-      });
-      clearHttpAttempts(req, 'admin-mfa-manage');
-      return sendJson(req, res, 200, { ok: true, enabled: false, revokedSessions: revoked.count });
-    });
-  }
-
-  const removePasskey = url.pathname.match(/^\/admin\/api\/mfa\/passkeys\/([^/]+)\/remove$/);
-  if (req.method === 'POST' && removePasskey) {
-    if (!allowHttpAttempt(req, res, 'admin-mfa-manage', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    const credentialId = decodeURIComponent(removePasskey[1]);
-    return withAdminDatabase((db) => {
-      requireCurrentAdminPassword(db, admin, body.currentPassword);
-      const result = dbApi.deleteAdminPasskey(db, admin.adminId, credentialId);
-      if (!result.count) throw apiError(404, 'passkey_not_found', 'passkey not found');
-      const remaining = dbApi.listAdminPasskeys(db, admin.adminId);
-      if (!remaining.length) dbApi.clearAdminMfa(db, admin.adminId);
-      req.voxhfAdmin = admin;
-      insertAdminAuditEvent(db, req, {
-        eventType: remaining.length ? 'admin.passkey_removed' : 'admin.mfa_disabled',
-        metadata: { credentialId },
-      });
-      clearHttpAttempts(req, 'admin-mfa-manage');
-      return sendJson(req, res, 200, {
-        ok: true,
-        enabled: remaining.length > 0,
-        passkeys: publicAdminPasskeys(remaining),
-        recoveryCodesRemaining: remaining.length ? dbApi.countAdminRecoveryCodes(db, admin.adminId) : 0,
-      });
-    });
-  }
-
-  return sendJson(req, res, 404, { ok: false, error: 'not found' });
-}
-
-async function handleAdminAuthApi(req, res, url) {
-  if (req.method === 'GET' && url.pathname === '/admin/api/auth/status') {
-    const admin = getAdminSessionFromRequest(req);
-    const accountCount = RELAY_AUTH_MODE === AUTH_MODE_ENV
-      ? 0
-      : withAdminDatabase((db) => require('./db').countAdminAccounts(db));
-    return sendJson(req, res, 200, {
-      ok: true,
-      accountLoginAvailable: RELAY_AUTH_MODE !== AUTH_MODE_ENV,
-      bootstrapRequired: RELAY_AUTH_MODE !== AUTH_MODE_ENV && accountCount === 0,
-      breakGlassAvailable: Boolean(ADMIN_TOKEN_HASH),
-      authenticated: Boolean(admin),
-      admin: admin ? publicAdminAccount(admin) : null,
-    });
-  }
-
-  if (RELAY_AUTH_MODE === AUTH_MODE_ENV) {
-    return sendJson(req, res, 409, {
-      ok: false,
-      code: 'admin_accounts_unavailable',
-      error: 'admin accounts require sqlite-fallback or sqlite auth mode',
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/auth/bootstrap') {
-    if (!allowHttpAttempt(req, res, 'admin-bootstrap', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    const tokenAdmin = authorizeAdminTokenRequest(req);
-    if (!tokenAdmin.ok) return sendJson(req, res, tokenAdmin.status, { ok: false, error: tokenAdmin.error });
-    const body = await readJsonBody(req);
-    const username = requireAdminLoginName(body.username);
-    const displayName = requireAccountDisplayName(body.displayName || username);
-    const password = requireAccountPassword(body.password);
-
-    return withAdminDatabase((db) => {
-      if (require('./db').countAdminAccounts(db) > 0) {
-        return sendJson(req, res, 409, {
-          ok: false,
-          code: 'admin_already_bootstrapped',
-          error: 'an owner account already exists',
-        });
-      }
-      const account = require('./db').createAdminAccount(db, {
-        username,
-        displayName,
-        passwordHash: hashPassword(password),
-        role: 'owner',
-      });
-      const session = createAdminLoginSession(db, req, account);
-      req.voxhfAdmin = { kind: 'session', ...account, ...session };
-      insertAdminAuditEvent(db, req, { eventType: 'admin.owner_bootstrapped' });
-      clearHttpAttempts(req, 'admin-bootstrap');
-      return sendJson(req, res, 201, {
-        ok: true,
-        admin: publicAdminAccount({ ...account, ...session }),
-      }, adminSessionCookieHeaders(req, session.sessionToken, session.expiresAt));
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/auth/login') {
-    if (!allowHttpAttempt(req, res, 'admin-login', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    const username = String(body.username || '').trim().toLowerCase();
-    const password = String(body.password || '');
-
-    return withAdminDatabaseAsync(async (db) => {
-      const account = isUserId(username)
-        ? require('./db').getAdminAccountCredentials(db, username)
-        : null;
-      if (!account || account.disabledAt || !verifyPassword(password, account.passwordHash)) {
-        return sendJson(req, res, 401, {
-          ok: false,
-          code: 'invalid_credentials',
-          error: 'invalid username or password',
-        });
-      }
-
-      const passkeys = require('./db').listAdminPasskeys(db, account.adminId);
-      if (passkeys.length) {
-        const challenge = await beginAdminMfaAuthentication(db, req, account, passkeys);
-        clearHttpAttempts(req, 'admin-login');
-        return sendJson(req, res, 200, {
-          ok: true,
-          mfaRequired: true,
-          flowToken: challenge.flowToken,
-          expiresAt: challenge.expiresAt,
-          options: challenge.options,
-          recoveryAvailable: require('./db').countAdminRecoveryCodes(db, account.adminId) > 0,
-        });
-      }
-
-      const session = createAdminLoginSession(db, req, account);
-      require('./db').setAdminLastLogin(db, account.adminId);
-      req.voxhfAdmin = { kind: 'session', ...account, ...session };
-      insertAdminAuditEvent(db, req, { eventType: 'admin.login' });
-      clearHttpAttempts(req, 'admin-login');
-      return sendJson(req, res, 200, {
-        ok: true,
-        admin: publicAdminAccount({ ...account, ...session }),
-      }, adminSessionCookieHeaders(req, session.sessionToken, session.expiresAt));
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/auth/mfa/passkey') {
-    if (!allowHttpAttempt(req, res, 'admin-mfa-login', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    const flowToken = String(body.flowToken || '').trim();
-    const credential = body.credential;
-    if (!isTokenLike(flowToken) || !credential?.id) {
-      throw apiError(400, 'invalid_mfa_response', 'passkey response is incomplete');
-    }
-
-    return withAdminDatabaseAsync(async (db) => {
-      const challenge = require('./db').consumeAdminMfaChallenge(db, {
-        flowToken,
-        purpose: 'authentication',
-      });
-      if (!challenge) throw apiError(401, 'mfa_challenge_expired', 'MFA challenge expired; sign in again');
-
-      const account = require('./db').getAdminAccountCredentialsById(db, challenge.adminId);
-      const passkey = require('./db').getAdminPasskey(db, challenge.adminId, credential.id);
-      if (!account || account.disabledAt || !passkey) {
-        throw apiError(401, 'invalid_mfa_response', 'passkey authentication failed');
-      }
-
-      let authenticationInfo;
-      try {
-        authenticationInfo = await adminMfa.completeAuthentication(
-          credential,
-          challenge.challenge,
-          passkey,
-          { origin: challenge.origin, rpId: challenge.rpId }
-        );
-      } catch (_) {
-        throw apiError(401, 'invalid_mfa_response', 'passkey authentication failed');
-      }
-
-      require('./db').updateAdminPasskeyUsage(db, account.adminId, passkey.credentialId, {
-        counter: authenticationInfo.newCounter,
-        deviceType: authenticationInfo.credentialDeviceType,
-        backedUp: authenticationInfo.credentialBackedUp,
-      });
-      const session = createAdminLoginSession(db, req, account);
-      require('./db').setAdminLastLogin(db, account.adminId);
-      req.voxhfAdmin = { kind: 'session', ...account, ...session };
-      insertAdminAuditEvent(db, req, {
-        eventType: 'admin.login_mfa',
-        metadata: { factor: 'passkey', credentialId: passkey.credentialId },
-      });
-      clearHttpAttempts(req, 'admin-mfa-login');
-      return sendJson(req, res, 200, {
-        ok: true,
-        admin: publicAdminAccount({ ...account, ...session }),
-      }, adminSessionCookieHeaders(req, session.sessionToken, session.expiresAt));
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/auth/mfa/recovery') {
-    if (!allowHttpAttempt(req, res, 'admin-mfa-recovery', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    const flowToken = String(body.flowToken || '').trim();
-    const recoveryCode = adminMfa.normalizeRecoveryCode(body.recoveryCode);
-    if (!isTokenLike(flowToken) || !recoveryCode) {
-      throw apiError(400, 'invalid_recovery_code', 'recovery code is required');
-    }
-
-    return withAdminDatabase((db) => {
-      const challenge = require('./db').consumeAdminMfaChallenge(db, {
-        flowToken,
-        purpose: 'authentication',
-      });
-      if (!challenge) throw apiError(401, 'mfa_challenge_expired', 'MFA challenge expired; sign in again');
-      const account = require('./db').getAdminAccountCredentialsById(db, challenge.adminId);
-      const used = account && require('./db').consumeAdminRecoveryCode(
-        db,
-        account.adminId,
-        adminMfa.hashRecoveryCode(account.adminId, recoveryCode)
-      );
-      if (!account || account.disabledAt || !used?.count) {
-        throw apiError(401, 'invalid_recovery_code', 'recovery code is invalid or already used');
-      }
-
-      const session = createAdminLoginSession(db, req, account);
-      require('./db').setAdminLastLogin(db, account.adminId);
-      req.voxhfAdmin = { kind: 'session', ...account, ...session };
-      insertAdminAuditEvent(db, req, {
-        eventType: 'admin.login_mfa',
-        metadata: { factor: 'recovery_code' },
-      });
-      clearHttpAttempts(req, 'admin-mfa-recovery');
-      return sendJson(req, res, 200, {
-        ok: true,
-        admin: publicAdminAccount({ ...account, ...session }),
-      }, adminSessionCookieHeaders(req, session.sessionToken, session.expiresAt));
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/auth/logout') {
-    const admin = getAdminSessionFromRequest(req);
-    const token = getAdminSessionTokenFromRequest(req);
-    if (admin && token) {
-      withAdminDatabase((db) => {
-        require('./db').revokeAdminSessionById(db, admin.adminId, admin.sessionId);
-        req.voxhfAdmin = admin;
-        insertAdminAuditEvent(db, req, { eventType: 'admin.logout' });
-      });
-    }
-    return sendJson(req, res, 200, { ok: true }, clearAdminSessionCookieHeaders(req));
-  }
-
-  if (req.method === 'GET' && url.pathname === '/admin/api/auth/me') {
-    const admin = getAdminSessionFromRequest(req);
-    if (!admin) return sendJson(req, res, 401, { ok: false, code: 'not_authenticated', error: 'not authenticated' });
-    return sendJson(req, res, 200, { ok: true, admin: publicAdminAccount(admin) });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/auth/password') {
-    const admin = getAdminSessionFromRequest(req);
-    if (!admin) return sendJson(req, res, 401, { ok: false, code: 'not_authenticated', error: 'not authenticated' });
-    if (!allowHttpAttempt(req, res, 'admin-password', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    const body = await readJsonBody(req);
-    const currentPassword = String(body.currentPassword || '');
-    const newPassword = requireAccountPassword(body.newPassword);
-
-    return withAdminDatabase((db) => {
-      const account = require('./db').getAdminAccountCredentials(db, admin.username);
-      if (!account || !verifyPassword(currentPassword, account.passwordHash)) {
-        return sendJson(req, res, 401, {
-          ok: false,
-          code: 'invalid_credentials',
-          error: 'current password is incorrect',
-        });
-      }
-      require('./db').setAdminPassword(db, admin.adminId, hashPassword(newPassword));
-      const revoked = require('./db').revokeOtherAdminSessions(db, admin.adminId, admin.sessionId);
-      req.voxhfAdmin = admin;
-      insertAdminAuditEvent(db, req, {
-        eventType: 'admin.password_changed',
-        metadata: { revokedSessions: revoked.count },
-      });
-      clearHttpAttempts(req, 'admin-password');
-      return sendJson(req, res, 200, { ok: true, revokedSessions: revoked.count });
-    });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/admin/api/auth/recover') {
-    if (!allowHttpAttempt(req, res, 'admin-recovery', MAX_ADMIN_ATTEMPTS_PER_WINDOW)) return;
-    const tokenAdmin = authorizeAdminTokenRequest(req);
-    if (!tokenAdmin.ok) return sendJson(req, res, tokenAdmin.status, { ok: false, error: tokenAdmin.error });
-    const body = await readJsonBody(req);
-    const username = requireAdminLoginName(body.username);
-    const newPassword = requireAccountPassword(body.newPassword);
-
-    return withAdminDatabase((db) => {
-      const account = require('./db').getAdminAccountCredentials(db, username);
-      if (!account || account.disabledAt) {
-        return sendJson(req, res, 404, { ok: false, code: 'admin_not_found', error: 'admin account not found' });
-      }
-      require('./db').setAdminPassword(db, account.adminId, hashPassword(newPassword));
-      require('./db').revokeAllAdminSessions(db, account.adminId);
-      const clearedMfa = require('./db').clearAdminMfa(db, account.adminId);
-      const session = createAdminLoginSession(db, req, account);
-      req.voxhfAdmin = { kind: 'session', ...account, ...session };
-      insertAdminAuditEvent(db, req, {
-        eventType: 'admin.break_glass_recovery',
-        metadata: { clearedPasskeys: clearedMfa.passkeys },
-      });
-      clearHttpAttempts(req, 'admin-recovery');
-      return sendJson(req, res, 200, {
-        ok: true,
-        admin: publicAdminAccount({ ...account, ...session }),
-      }, adminSessionCookieHeaders(req, session.sessionToken, session.expiresAt));
-    });
-  }
-
-  return sendJson(req, res, 404, { ok: false, error: 'not found' });
 }
 
 function registerAgent(ws, client, message) {
@@ -1528,6 +623,7 @@ function registerAgent(ws, client, message) {
   client.deviceId = deviceId;
   client.deviceName = device.deviceName;
   devices.set(key, device);
+  agentWatchdog.agentOnline(key);
   rememberRelayAgent(device);
   recordAuditEvent({
     eventType: 'agent.connected',
@@ -1545,6 +641,40 @@ function registerAgent(ws, client, message) {
     online: true,
   }, `device-${message.id}`));
   broadcastDeviceState(device);
+}
+
+function handleAgentWatchdogMessage(ws, client, message) {
+  // Watchdog traffic is relay-internal and accepted only from the currently
+  // announced socket for this device. Browsers cannot stage Push requests.
+  const currentDevice = client.deviceKey ? devices.get(client.deviceKey) : null;
+  if (client.source !== MESSAGE_SOURCES.AGENT || !client.deviceKey || currentDevice?.ws !== ws) {
+    send(ws, createRemoteMessage(MESSAGE_TYPES.RELAY_ERROR, {
+      code: 'watchdog-unavailable',
+      message: 'Agent must announce itself before configuring the watchdog',
+    }));
+    return;
+  }
+
+  let result;
+  if (message.type === MESSAGE_TYPES.AGENT_WATCHDOG_TICKET) {
+    result = agentWatchdog.stage(client.deviceKey, message.payload);
+  } else if (message.type === MESSAGE_TYPES.AGENT_WATCHDOG_COMMIT) {
+    result = agentWatchdog.commit(client.deviceKey, message.payload);
+  } else {
+    result = agentWatchdog.disarm(client.deviceKey, message.payload.sessionId);
+    if (result.fired) {
+      send(ws, createRemoteMessage(MESSAGE_TYPES.AGENT_WATCHDOG_FIRED, {
+        sessionId: message.payload.sessionId,
+      }, `watchdog-fired-${Date.now().toString(36)}`));
+    }
+  }
+
+  if (!result.ok) {
+    send(ws, createRemoteMessage(MESSAGE_TYPES.RELAY_ERROR, {
+      code: 'watchdog-invalid',
+      message: result.error,
+    }));
+  }
 }
 
 function refreshPairingCode(ws, client, deviceName) {
@@ -1804,6 +934,7 @@ function rememberDeviceSnapshot(device, message) {
     || message.type === MESSAGE_TYPES.STATIONS_STATE
     || message.type === MESSAGE_TYPES.WEATHER_STATE
     || message.type === MESSAGE_TYPES.NOTIFICATION_STATE
+    || message.type === MESSAGE_TYPES.UNICOM_TIMER_STATE
   ) {
     device.lastMessages.set(message.type, message);
   }
@@ -1817,6 +948,7 @@ function sendCachedDeviceState(ws, device) {
     MESSAGE_TYPES.STATIONS_STATE,
     MESSAGE_TYPES.WEATHER_STATE,
     MESSAGE_TYPES.NOTIFICATION_STATE,
+    MESSAGE_TYPES.UNICOM_TIMER_STATE,
   ]) {
     const message = device.lastMessages?.get(type);
     if (message) send(ws, message);
@@ -1843,6 +975,7 @@ function removeClient(ws) {
   const existing = devices.get(client.deviceKey);
   if (!existing || existing.ws !== ws) return;
 
+  agentWatchdog.agentOffline(client.deviceKey);
   devices.delete(client.deviceKey);
   deletePairingCodesForDevice(client.userId, client.deviceId);
   recordAuditEvent({
@@ -2269,12 +1402,6 @@ function sendAdminAsset(res, asset) {
   });
 }
 
-function authorizeAdminRequest(req) {
-  const session = getAdminSessionFromRequest(req);
-  if (session) return { ok: true, kind: 'session', ...session };
-  return authorizeAdminTokenRequest(req);
-}
-
 function authorizeAdminTokenRequest(req) {
   if (!ADMIN_TOKEN_HASH) return { ok: false, status: 403, error: 'admin token is not configured' };
 
@@ -2287,290 +1414,8 @@ function authorizeAdminTokenRequest(req) {
   return { ok: true, kind: 'break-glass', actorId: 'admin-token' };
 }
 
-function withAccountDatabase(callback) {
-  const db = openAdminDatabase();
-  try {
-    return callback(db);
-  } finally {
-    db.close();
-  }
-}
-
-async function withAdminDatabaseAsync(callback) {
-  const db = openAdminDatabase();
-  try {
-    return await callback(db);
-  } finally {
-    db.close();
-  }
-}
-
-async function beginAdminMfaAuthentication(db, req, account, passkeys) {
-  let context;
-  try {
-    context = adminMfa.resolveWebAuthnContext(req, {
-      allowedOrigins: ALLOWED_ORIGINS,
-      rpId: WEBAUTHN_RP_ID,
-      rpName: WEBAUTHN_RP_NAME,
-    });
-  } catch (err) {
-    throw apiError(400, 'webauthn_configuration_error', err.message);
-  }
-
-  const options = await adminMfa.createAuthenticationOptions(passkeys, context);
-  const flowToken = generateRelayToken();
-  const expiresAt = new Date(Date.now() + ADMIN_MFA_CHALLENGE_TTL_MS).toISOString();
-  require('./db').createAdminMfaChallenge(db, {
-    adminId: account.adminId,
-    flowToken,
-    purpose: 'authentication',
-    challenge: options.challenge,
-    origin: context.origin,
-    rpId: context.rpId,
-    expiresAt,
-  });
-  return { flowToken, expiresAt, options };
-}
-
-function requireCurrentAdminPassword(db, admin, value) {
-  const account = require('./db').getAdminAccountCredentialsById(db, admin.adminId);
-  if (!account || account.disabledAt || !verifyPassword(String(value || ''), account.passwordHash)) {
-    throw apiError(401, 'invalid_credentials', 'current password is incorrect');
-  }
-  return account;
-}
-
-function requirePasskeyName(value) {
-  const name = String(value || '').trim();
-  if (!name || name.length > 60) {
-    throw apiError(400, 'invalid_passkey_name', 'passkey name must be 1-60 characters');
-  }
-  return name;
-}
-
-function publicAdminPasskeys(passkeys) {
-  return passkeys.map((passkey) => ({
-    credentialId: passkey.credentialId,
-    name: passkey.name,
-    deviceType: passkey.deviceType,
-    backedUp: passkey.backedUp,
-    createdAt: passkey.createdAt,
-    lastUsedAt: passkey.lastUsedAt,
-  }));
-}
-
-function createAccountSession(db, req, userId) {
-  const sessionToken = generateRelayToken();
-  const expiresAt = new Date(Date.now() + ACCOUNT_SESSION_TTL_MS).toISOString();
-  const browserId = readBrowserIdFromBodyHint(req);
-  const browserIdHash = browserId && isTokenLike(browserId)
-    ? require('./db').hashBrowserForUser(userId, browserId)
-    : '';
-
-  const session = require('./db').createBrowserSession(db, {
-    userId,
-    sessionToken,
-    expiresAt,
-    browserIdHash,
-    ipAddress: STORE_SESSION_METADATA ? getRequestIp(req) : '',
-    userAgent: STORE_SESSION_METADATA ? req.headers['user-agent'] || '' : '',
-  });
-
-  return {
-    ...session,
-    userName: session.displayName || session.userId,
-    sessionToken,
-  };
-}
-
-function createAdminLoginSession(db, req, account) {
-  const sessionToken = generateRelayToken();
-  const expiresAt = new Date(Date.now() + ADMIN_SESSION_TTL_MS).toISOString();
-  const session = require('./db').createAdminSession(db, {
-    adminId: account.adminId,
-    sessionToken,
-    expiresAt,
-    ipAddress: STORE_SESSION_METADATA ? getRequestIp(req) : '',
-    userAgent: STORE_SESSION_METADATA ? req.headers['user-agent'] || '' : '',
-  });
-  return { ...session, sessionToken };
-}
-
-function getAdminSessionFromRequest(req) {
-  const token = getAdminSessionTokenFromRequest(req);
-  if (!token || RELAY_AUTH_MODE === AUTH_MODE_ENV) return null;
-  try {
-    return withAdminDatabase((db) => require('./db').getAdminSession(db, token, {
-      idleTtlMs: ADMIN_SESSION_IDLE_TTL_MS,
-    }));
-  } catch (err) {
-    console.warn(`[relay-admin] Could not read admin session: ${err.message}`);
-    return null;
-  }
-}
-
-function getAccountSession(req) {
-  const token = getSessionTokenFromRequest(req);
-  if (!token || RELAY_AUTH_MODE === AUTH_MODE_ENV) return null;
-
-  try {
-    const db = openAdminDatabase();
-    try {
-      const session = require('./db').getBrowserSession(db, token);
-      if (!session) return null;
-      return {
-        sessionId: session.sessionId,
-        userId: session.userId,
-        userName: session.displayName || session.userId,
-        expiresAt: session.expiresAt,
-      };
-    } finally {
-      db.close();
-    }
-  } catch (err) {
-    console.warn(`[relay-account] Could not read browser session: ${err.message}`);
-    return null;
-  }
-}
-
-function findRelayUserBySession(req) {
-  const session = getAccountSession(req);
-  if (!session) return null;
-  return {
-    sessionId: session.sessionId,
-    userId: session.userId,
-    userName: session.userName || session.userId,
-  };
-}
-
-function getSessionTokenFromRequest(req) {
-  const cookies = parseCookies(req.headers.cookie || '');
-  return cookies[ACCOUNT_SESSION_COOKIE] || '';
-}
-
-function getAdminSessionTokenFromRequest(req) {
-  const cookies = parseCookies(req.headers.cookie || '');
-  return cookies[ADMIN_SESSION_COOKIE] || '';
-}
-
-function parseCookies(header) {
-  const cookies = {};
-  for (const part of String(header || '').split(';')) {
-    const index = part.indexOf('=');
-    if (index <= 0) continue;
-    const name = part.slice(0, index).trim();
-    const value = part.slice(index + 1).trim();
-    if (!name) continue;
-    try {
-      cookies[name] = decodeURIComponent(value);
-    } catch (_) {
-      cookies[name] = value;
-    }
-  }
-  return cookies;
-}
-
-function sessionCookieHeaders(req, sessionToken, expiresAt) {
-  return {
-    'set-cookie': buildSessionCookie(req, sessionToken, {
-      maxAgeSeconds: Math.max(1, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000)),
-    }),
-  };
-}
-
-function clearSessionCookieHeaders(req) {
-  return {
-    'set-cookie': buildSessionCookie(req, '', { maxAgeSeconds: 0 }),
-  };
-}
-
-function adminSessionCookieHeaders(req, sessionToken, expiresAt) {
-  return {
-    'set-cookie': buildNamedSessionCookie(req, ADMIN_SESSION_COOKIE, sessionToken, {
-      path: '/admin',
-      sameSite: 'Strict',
-      maxAgeSeconds: Math.max(1, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000)),
-    }),
-  };
-}
-
-function clearAdminSessionCookieHeaders(req) {
-  return {
-    'set-cookie': buildNamedSessionCookie(req, ADMIN_SESSION_COOKIE, '', {
-      path: '/admin',
-      sameSite: 'Strict',
-      maxAgeSeconds: 0,
-    }),
-  };
-}
-
-function buildSessionCookie(req, value, options = {}) {
-  return buildNamedSessionCookie(req, ACCOUNT_SESSION_COOKIE, value, {
-    path: '/',
-    sameSite: 'Lax',
-    ...options,
-  });
-}
-
-function buildNamedSessionCookie(req, name, value, options = {}) {
-  const parts = [
-    `${name}=${encodeURIComponent(value)}`,
-    `Path=${options.path || '/'}`,
-    'HttpOnly',
-    `SameSite=${options.sameSite || 'Lax'}`,
-    `Max-Age=${Math.max(0, Number(options.maxAgeSeconds || 0))}`,
-  ];
-  if (isSecureRequest(req)) parts.push('Secure');
-  return parts.join('; ');
-}
-
-function isSecureRequest(req) {
-  return req.socket.encrypted || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
-}
-
-function publicAccountUser(session) {
-  return {
-    userId: session.userId,
-    userName: session.userName || session.displayName || session.userId,
-    expiresAt: session.expiresAt,
-  };
-}
-
-function hasCurrentLegalAcceptance(body) {
-  return body.acceptTerms === true
-    && body.acknowledgePrivacy === true
-    && body.termsVersion === LEGAL.termsVersion
-    && body.privacyVersion === LEGAL.privacyVersion;
-}
-
-function publicAdminAccount(admin) {
-  return {
-    username: admin.username,
-    displayName: admin.displayName || admin.username,
-    role: admin.role,
-    expiresAt: admin.expiresAt,
-  };
-}
-
-class AccountApiError extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.name = 'AccountApiError';
-    this.status = status;
-    this.code = code;
-  }
-}
-
-function isAccountApiError(err) {
-  return err instanceof AccountApiError;
-}
-
-function accountApiError(status, code, message) {
-  return new AccountApiError(status, code, message);
-}
-
 function isApiError(err) {
-  return isAccountApiError(err) || err?.isApiError === true;
+  return err?.isApiError === true;
 }
 
 function apiError(status, code, message) {
@@ -2580,54 +1425,6 @@ function apiError(status, code, message) {
   err.code = code;
   err.isApiError = true;
   return err;
-}
-
-function requireAccountUserId(value) {
-  const userId = String(value || '').trim().toLowerCase();
-  if (!isUserId(userId)) {
-    throw accountApiError(
-      400,
-      'invalid_username',
-      'Use a 2-48 character username: letters, numbers, dot, underscore, or dash.'
-    );
-  }
-  return userId;
-}
-
-function requireAccountDisplayName(value) {
-  const text = String(value || '').trim();
-  if (!text || text.length > 80) {
-    throw accountApiError(400, 'invalid_display_name', 'Display name must be 1-80 characters.');
-  }
-  return text;
-}
-
-function requireAccountPassword(value) {
-  const password = String(value || '');
-  if (password.length < 10 || password.length > 256) {
-    throw accountApiError(400, 'invalid_password', 'Password must be 10-256 characters.');
-  }
-  return password;
-}
-
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const key = crypto.scryptSync(password, salt, 64).toString('hex');
-  return `scrypt:${salt}:${key}`;
-}
-
-function verifyPassword(password, storedHash) {
-  const parts = String(storedHash || '').split(':');
-  if (parts.length !== 3 || parts[0] !== 'scrypt') return false;
-  const expected = Buffer.from(parts[2], 'hex');
-  const actual = crypto.scryptSync(String(password || ''), parts[1], expected.length);
-  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-}
-
-function readBrowserIdFromBodyHint(_req) {
-  // Reserved for a later account/devices screen. Sessions work without this
-  // because WebSocket browser ids are still supplied during /ws connect.
-  return '';
 }
 
 function closeAgentClientsForUser(userId, reason) {
@@ -2679,33 +1476,8 @@ function closeBrowserSessionClients(userId, sessionIds, reason) {
   }
 }
 
-function withAdminDatabase(callback) {
-  const db = openAdminDatabase();
-  try {
-    return callback(db);
-  } finally {
-    db.close();
-  }
-}
-
 function openAdminDatabase() {
   return require('./db').openRelayDatabase();
-}
-
-function defaultRelayDatabasePath() {
-  return require('./db').defaultDatabasePath();
-}
-
-function listAdminRelayUsers(db) {
-  return require('./db').listRelayUserSummaries(db).map((row) => ({
-    userId: row.userId,
-    displayName: row.displayName,
-    createdAt: row.createdAt,
-    disabledAt: row.disabledAt,
-    tokenCount: row.tokenCount || 0,
-    activeTokenCount: row.activeTokenCount || 0,
-    activeTokenPrefixes: row.activeTokenPrefixes ? row.activeTokenPrefixes.split(',') : [],
-  }));
 }
 
 function listAdminRelayDevices(db) {
@@ -2747,67 +1519,6 @@ function listAdminRelayPairings(db) {
     lastUsedAt: row.lastUsedAt,
     online: devices.has(scopedDeviceKey(row.userId, row.deviceId)),
   }));
-}
-
-function listAdminAuditEvents(db) {
-  return require('./db').listAuditEvents(db, { limit: 120 }).map((row) => ({
-    auditId: row.auditId,
-    userId: row.userId || null,
-    actorType: row.actorType,
-    actorId: row.actorId,
-    eventType: row.eventType,
-    ipAddress: row.ipAddress,
-    targetAgentId: row.targetAgentId,
-    targetBrowserPairingId: row.targetBrowserPairingId,
-    commandType: row.commandType,
-    createdAt: row.createdAt,
-    metadata: parseAuditMetadata(row.metadataJson),
-  }));
-}
-
-function getAdminRelayUser(db, userId) {
-  return require('./db').getRelayUser(db, userId);
-}
-
-function importAdminRelayUserToken(db, input) {
-  return require('./db').importRelayUserToken(db, {
-    ...input,
-    tokenName: 'Relay preview token',
-  });
-}
-
-function revokeAdminRelayUserTokens(db, input) {
-  return require('./db').revokeRelayUserTokens(db, {
-    ...input,
-    tokenName: 'Relay preview token',
-  });
-}
-
-function setAdminRelayUserDisabled(db, userId, disabled) {
-  return require('./db').setRelayUserDisabled(db, userId, disabled);
-}
-
-function deleteAdminRelayUser(db, userId) {
-  return require('./db').deleteRelayUser(db, userId);
-}
-
-function revokeAdminRelayPairing(db, pairingId) {
-  return require('./db').revokeBrowserPairingById(db, pairingId);
-}
-
-function insertAdminAuditEvent(db, req, input) {
-  if (!PERSIST_AUDIT) return;
-  try {
-    const actor = req.voxhfAdmin;
-    require('./db').insertAuditEvent(db, {
-      ...input,
-      actorType: 'admin',
-      actorId: actor?.username || actor?.actorId || 'admin-token',
-      ipAddress: getRequestIp(req),
-    });
-  } catch (err) {
-    console.warn(`[relay-audit] Could not write admin audit event: ${err.message}`);
-  }
 }
 
 function insertAccountAuditEvent(db, req, input) {
@@ -2881,16 +1592,6 @@ function runDataMaintenance() {
   }
 }
 
-function parseAuditMetadata(metadataJson) {
-  if (!metadataJson) return {};
-  try {
-    const parsed = JSON.parse(metadataJson);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (_) {
-    return {};
-  }
-}
-
 function reloadRelayUsers() {
   const refreshed = loadRelayUsers();
   relayUsers.clear();
@@ -2926,24 +1627,6 @@ function disconnectRevokedPairingClients(userId, browserHash, deviceId) {
   }
 }
 
-function requireAdminUserId(userId) {
-  const value = String(userId || '').trim();
-  if (!isUserId(value)) throw new Error('invalid user id');
-  return value;
-}
-
-function requireAdminLoginName(value) {
-  const username = String(value || '').trim().toLowerCase();
-  if (!isUserId(username)) {
-    throw apiError(
-      400,
-      'invalid_username',
-      'Use a 2-48 character username: letters, numbers, dot, underscore, or dash.'
-    );
-  }
-  return username;
-}
-
 function getRequestIp(req) {
   const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
   return forwarded || req.socket.remoteAddress || '';
@@ -2951,16 +1634,6 @@ function getRequestIp(req) {
 
 function generateRelayToken() {
   return crypto.randomBytes(32).toString('hex');
-}
-
-function generateAccountRecoveryCode() {
-  const groups = crypto.randomBytes(16).toString('hex').toUpperCase().match(/.{1,4}/g);
-  return `VHF-RESET-${groups.join('-')}`;
-}
-
-function normalizeAccountRecoveryCode(value) {
-  const normalized = String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return /^VHFRESET[A-F0-9]{32}$/.test(normalized) ? normalized : '';
 }
 
 function sendOptions(req, res) {
@@ -3165,10 +1838,6 @@ function clampInteger(value, fallback, min, max) {
 
 function isTokenLike(value) {
   return typeof value === 'string' && /^[A-Za-z0-9._:-]{8,160}$/.test(value);
-}
-
-function isUserId(value) {
-  return typeof value === 'string' && /^[A-Za-z0-9._-]{2,48}$/.test(value);
 }
 
 function scopedDeviceKey(userId, deviceId) {

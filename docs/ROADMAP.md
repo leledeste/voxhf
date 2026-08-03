@@ -23,6 +23,11 @@ status, not implementation history. Released changes belong in
   reconnect, independently of notification permission.
 - Per-device Web Push for incoming private messages and public messages that
   begin with the active callsign.
+- Optional per-device remote alert when the simulator PC or local proxy becomes
+  unreachable during a confirmed IVAO session, using memory-only sealed Push
+  tickets at the relay.
+- Proxy-owned three-minute UNICOM reminder synchronized across connected
+  devices, with an expiry Push alert.
 - METAR/TAF/ATIS, route weather, and plain-language weather interpretation.
 - Heartbeat and standby recovery.
 
@@ -69,7 +74,11 @@ status, not implementation history. Released changes belong in
   but should remain covered by live regression tests because the observed
   protocol can change.
 - Web Push delivery has been validated on Windows and on iOS with the screen
-  locked; a live controller-addressed message remains to be validated.
+  locked, including a live controller-addressed message.
+- The agent-offline watchdog has automated protocol, routing, expiry, reconnect,
+  endpoint, and delivery tests. Closing the proxy, shutting down the PC, and
+  losing the PC network path have also been validated against the deployed
+  relay, including delivery after connectivity returns.
 
 ## Known Limitations
 
@@ -78,6 +87,12 @@ status, not implementation history. Released changes belong in
 - Another listener is required for final TX confirmation.
 - Overlapping RX transmissions may clip or cut.
 - iOS changes audio route/volume while its microphone is active.
+- A newly loaded iOS/iPadOS workspace requires one trusted tap before audible
+  RX. VoxHF exposes this browser requirement with an activation prompt over the
+  radio panel and shows it again if automatic recovery after standby fails.
+- Automatic UNICOM voice reports are not currently supported or usable. Current
+  UNICOM support is limited to manual `122.800` selection, text messaging, and
+  the synchronized three-minute reminder.
 - Local Slim currently requires Node.js and ffmpeg to be installed separately.
 - Full automated Altitude/IVAO integration tests do not exist yet.
 - Self-hosted account and admin surfaces need broader production review.
@@ -111,6 +126,9 @@ and operational work rather than repeating that completed functional test.
 - Experimental opt-in RX transcription with callsign context, without voice
   recording or persistent audio storage.
 - Structured clearance scratchpad.
+- Guided UNICOM text and voice reports based on flight phase and available
+  aircraft data, building on the manual reminder. Any automatic transmission
+  behavior requires a separate product decision and live IVAO validation.
 - Airport map with taxi route highlighting.
 - Aircraft model detection and optional checklist.
 - Further mobile ergonomics and iOS audio-route refinements.

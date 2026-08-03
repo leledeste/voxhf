@@ -49,7 +49,7 @@
       <div class="capabilities-heading"><p class="eyebrow">Core controls</p><h2 id="capabilities-title">The essentials stay together.</h2></div>
       <div class="capability-grid">
         <article><span>01</span><h3>Radio and transponder</h3><p>Tune one active frequency on COM1 or COM2, transmit, and control squawk, STBY/ALT and IDENT.</p></article>
-        <article><span>02</span><h3>Messages that follow the flight</h3><p>Recover the current session on every connected device and receive opt-in alerts for private or callsign-addressed messages.</p></article>
+        <article><span>02</span><h3>Messages that follow the flight</h3><p>Recover the current session on every connected device and receive opt-in alerts for private or callsign-addressed messages and IVAO disconnections, with stationary-aircraft suppression.</p></article>
         <article><span>03</span><h3>Local control, remote reach</h3><p>Keep the IVAO connection on your simulator PC and choose whether the browser stays local or uses your relay.</p></article>
       </div>
     </section>
@@ -128,7 +128,7 @@
     <section class="development-band">
       <div><p class="eyebrow">Project status</p><h2>Working software, now available as a public beta.</h2></div>
       <div class="status-ledger">
-        <div><strong>Working</strong><p>Local and remote COM, XPDR, messaging, session recovery, notifications, weather, browser RX and microphone TX.</p></div>
+        <div><strong>Working</strong><p>Local and remote COM, XPDR, messaging, a synchronized UNICOM reminder, session recovery, notifications, weather, browser RX and microphone TX.</p></div>
         <div><strong>In validation</strong><p>Clean installation, VPS recovery, compatibility checks and broader security review.</p></div>
         <div><strong>Next</strong><p>Independent review, beta feedback and stabilization toward a release candidate.</p></div>
       </div>
@@ -141,7 +141,7 @@
         <details><summary>Can I use only the local version?</summary><div class="faq-answer"><p>Yes. Local Slim requires no account, relay or public network access.</p></div></details>
         <details><summary>Can I connect to somebody else's server?</summary><div class="faq-answer"><p>Yes. The operator provides the app address and account access. Review the operator before trusting an independent server.</p></div></details>
         <details><summary>Does VoxHF store voice or chat?</summary><div class="faq-answer"><p>Voice is not recorded. The local proxy keeps a bounded recent chat only while that proxy session is running so every connected device can recover it after a refresh; the relay does not persist it.</p></div></details>
-        <details><summary>How do notifications work?</summary><div class="faq-answer"><p>They are enabled separately on each supported device. The local proxy sends alerts for private messages and public messages beginning with your active callsign; notification permission does not control chat recovery. On iPhone and iPad, add the hosted app to the Home Screen before enabling them. <a href="setup.html#ios-notifications">Read the iOS instructions.</a></p></div></details>
+        <details><summary>How do notifications work?</summary><div class="faq-answer"><p>Enable them separately on each device for message and disconnect alerts. Optional online and PC/proxy offline alerts are available in Settings. On iPhone and iPad, add the hosted app to the Home Screen first. <a href="setup.html#ios-notifications">Read the notification instructions.</a></p></div></details>
         <details><summary>Is VoxHF an official IVAO product?</summary><div class="faq-answer"><p>No. VoxHF is independent, unofficial and not affiliated with or endorsed by IVAO.</p></div></details>
       </div>
     </section>

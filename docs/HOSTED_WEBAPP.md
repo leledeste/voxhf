@@ -16,7 +16,10 @@ The browser connects to the relay with WSS. Never expose local ports `4827`,
 The hosted page does not own chat history or push delivery. After each refresh
 or reconnect it requests the current session history from the selected local
 agent, independently of notification permission. Push subscriptions are
-transported live through the relay and stored by that local agent.
+transported live through the relay and stored by that local agent. A device may
+separately opt into the remote PC/proxy offline alert; its confirmation explains
+that the local proxy then places a short-lived, already encrypted and signed
+Push request in relay memory for one-time delivery if the agent disappears.
 
 After deployment verify login, refresh persistence, two simultaneous browsers,
 COM/XPDR/chat commands, RX audio, and microphone TX with a connected local

@@ -166,6 +166,31 @@ Controls:
 - Short retention.
 - Review logging in code review.
 
+### Offline Watchdog Ticket Abuse
+
+A compromised browser attempts to arm the relay, or a compromised relay tries
+to reuse a temporary Push request or redirect it to an internal service.
+
+Controls:
+
+- Only the authenticated current agent can stage, commit, or disarm watchdog
+  batches; browsers cannot send those protocol types.
+- The local proxy creates the encrypted payload and VAPID signature and never
+  shares its private key or subscription encryption keys.
+- Ticket VAPID signatures expire within 15 minutes. Honest relays replace them
+  atomically, delete them before sending, and keep them in memory only.
+- Push destinations require HTTPS on port 443, reject IP literals and
+  credentials, and are restricted to known browser Push origins or explicit
+  operator additions.
+- Reconnect cancels the grace timer, and only a successfully accepted relay
+  delivery suppresses the local retry path.
+- Relay logs contain delivery counts only, never endpoints, authorization
+  headers, or encrypted bodies.
+
+Residual trust: a malicious relay operator could replay the exact sealed alert
+until its signature expires. The operator still cannot decrypt or modify the
+payload, generate another signed payload, or use it after expiry.
+
 ## Explicitly Disallowed Remote Capabilities
 
 - Raw FSD command tunnel.

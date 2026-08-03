@@ -26,13 +26,17 @@ function createWebCommandHandler(deps) {
       const result = deps.notifications.addSubscription(cmd.subscription);
       if (!result.ok) deps.sendSystem(ws, result.error);
       deps.sendNotificationState(ws);
+      deps.onNotificationsChanged?.();
       return;
     }
     if (cmd.action === 'notification_unsubscribe') {
       deps.notifications.removeSubscription(cmd.endpoint);
       deps.sendNotificationState(ws);
+      deps.onNotificationsChanged?.();
       return;
     }
+    if (cmd.action === 'unicom_timer_start') return deps.startUnicomTimer();
+    if (cmd.action === 'unicom_timer_cancel') return deps.cancelUnicomTimer();
 
     if (cmd.action === 'sim_com1') {
       return sendCommandResult(deps, ws, deps.setCom(1, cmd.freq, cmd.station), `COM1 -> ${cmd.freq} MHz`);

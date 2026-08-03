@@ -64,6 +64,7 @@ function parseFsdLine(rawLine, direction) {
     const callsign = parts[1];
     const lat = Number(parts[4]);
     const lon = Number(parts[5]);
+    const groundSpeed = parseBoundedNumber(parts[7], 0, 9999);
     const squawk = normalizeSquawkCode(parts[2]);
     const xpdrMode = parseFsdXpdrMode(parts[0]);
     if (direction === 'outgoing' && Number.isFinite(lat) && Number.isFinite(lon)) {
@@ -73,6 +74,7 @@ function parseFsdLine(rawLine, direction) {
         callsign,
         lat,
         lon,
+        groundSpeed,
         squawk,
         xpdrMode,
         timestamp: timestamp(),
@@ -148,6 +150,13 @@ function parseFsdLine(rawLine, direction) {
   }
 
   return null;
+}
+
+function parseBoundedNumber(value, min, max) {
+  const text = String(value ?? '').trim();
+  if (!text) return undefined;
+  const number = Number(text);
+  return Number.isFinite(number) && number >= min && number <= max ? number : undefined;
 }
 
 function parseFlightPlanFields(parts) {

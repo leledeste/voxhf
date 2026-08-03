@@ -1,4 +1,4 @@
-// Remote preview preflight.
+// Remote access preflight (the filename is retained for command compatibility).
 //
 // This checks the local relay environment, config.json remote-agent settings,
 // and the relay health endpoint. It does not connect to IVAO or Altitude; it is
@@ -130,10 +130,10 @@ async function main() {
   printNextSteps(relayUrl, relayToken);
 
   if (failures) {
-    console.log(`\n${failures} remote preview check(s) failed, ${warnings} warning(s).`);
+    console.log(`\n${failures} remote access check(s) failed, ${warnings} warning(s).`);
     process.exit(1);
   }
-  console.log(`\nRemote preview preflight passed with ${warnings} warning(s).`);
+  console.log(`\nRemote access preflight passed with ${warnings} warning(s).`);
 }
 
 function redact(value) {
@@ -143,7 +143,7 @@ function redact(value) {
 }
 
 function printNextSteps(relayUrl, relayToken) {
-  console.log('\nRemote preview values');
+  console.log('\nRemote access values');
   console.log(`Relay URL: ${relayUrl}`);
   console.log(`Relay Token: ${relayToken ? `${redact(relayToken)} (copy the full value from apps/relay/.env)` : '(missing)'}`);
   console.log('Local remote-preview URL: http://localhost:3000/?remote=1');

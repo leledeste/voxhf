@@ -292,7 +292,17 @@ function sha256File(file) {
 
 function sourceCommit() {
   try {
-    return execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    const commit = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+    // Local packages built before their release commit must not imply that the
+    // current HEAD exactly contains their sources. Tag builds remain clean.
+    const changes = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+    return changes ? `${commit}-dirty` : commit;
   } catch {
     return 'source-archive';
   }

@@ -114,6 +114,13 @@ account, hashed token, pairing, session, and device records needed for access.
 Voice audio and chat history are never persisted. IP/user-agent session
 metadata and audit history are opt-in and disabled by default.
 
+The optional PC/proxy offline alert keeps short-lived sealed Push requests in
+relay process memory while a confirmed IVAO session is armed. The requests are
+already encrypted and signed by the local proxy, are deleted before one-time
+delivery, and are never written to SQLite, audits, logs, or backups. The relay
+uses native WebSocket Ping frames plus a 30-second offline grace period by
+default.
+
 The relay checks backup storage at startup and once per day. Recognized SQLite
 backups, their checksum metadata, and pre-restore database copies are removed
 after `VOXHF_BACKUP_RETENTION_DAYS` (30 days by default). Unrelated files are
@@ -124,6 +131,9 @@ never selected by this cleanup.
 ```powershell
 npm.cmd run verify
 npm.cmd run remote:test
+npm.cmd run relay:account:test
+npm.cmd run relay:admin:test
+npm.cmd run watchdog:test
 npm.cmd run remote:check
 npm.cmd run relay:mfa:preflight -- https://relay.example.com
 ```
@@ -160,5 +170,8 @@ npm.cmd run relay:mfa:preflight -- https://relay.example.com
 - `VOXHF_RELAY_MAX_ADMIN_ATTEMPTS_PER_WINDOW`
 - `VOXHF_RELAY_MAX_AUDIO_FRAME_BYTES`
 - `VOXHF_RELAY_MAX_REMOTE_TX_DURATION_MS`
+- `VOXHF_AGENT_HEARTBEAT_INTERVAL_MS`
+- `VOXHF_AGENT_WATCHDOG_OFFLINE_DELAY_MS`
+- `VOXHF_WATCHDOG_PUSH_ORIGINS` (optional exact HTTPS Push origins)
 
 Use `apps/relay/.env.example` as the complete reference.

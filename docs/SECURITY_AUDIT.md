@@ -1,8 +1,8 @@
 # Security Audit Baseline
 
-Date: 2026-07-13
+Date: 2026-08-03
 
-This is an internal engineering review of the pre-release VoxHF codebase. It
+This is an internal engineering review of the public-beta VoxHF codebase. It
 documents verified controls and remaining risks; it is not a third-party
 penetration test or a guarantee that the software is vulnerability-free.
 
@@ -12,7 +12,8 @@ penetration test or a guarantee that the software is vulnerability-free.
 - Registration invites and the relay admin API.
 - Agent tokens, browser pairing, WebSocket authentication, and user isolation.
 - Remote command and live RX/TX routing.
-- Multi-device session chat recovery and local-agent Web Push delivery.
+- Multi-device session chat recovery, local-agent Web Push delivery, and the
+  optional relay watchdog for complete proxy/PC loss.
 - SQLite storage, logging, Docker/Caddy, browser headers, and dependencies.
 - Local-agent command allowlists and privacy guards already covered by CI.
 
@@ -34,6 +35,11 @@ penetration test or a guarantee that the software is vulnerability-free.
 - Remote TX requires an active selected device and explicit TX state, validates
   binary framing, has a maximum duration, and stops on disconnect.
 - Voice and chat contents are routed live and are not persisted by the relay.
+- Agent-offline watchdog tickets are prepared and signed by the local proxy,
+  bounded by the protocol, held only in relay memory, restricted to allowlisted
+  HTTPS Push origins, consumed before delivery, and covered by focused tests.
+- IVAO disconnect suppression requires two fresh position samples at no more
+  than five knots; missing or stale telemetry fails safe by notifying.
 - Session IP/user-agent metadata and audit persistence are disabled by default.
 - Production dependencies reported zero known vulnerabilities through
   `npm audit --omit=dev` on the audit date.

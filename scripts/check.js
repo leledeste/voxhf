@@ -45,6 +45,7 @@ const requiredFiles = [
   'proxy/fsd-parser.js',
   'proxy/local-web-server.js',
   'proxy/push-notifications.js',
+  'proxy/unicom-timer.js',
   'proxy/ogg-speex.js',
   'proxy/pilot-bridge.js',
   'proxy/pilot-core.js',
@@ -56,6 +57,11 @@ const requiredFiles = [
   'proxy/web-tx.js',
   'proxy/websocket-commands.js',
   'apps/relay/index.js',
+  'apps/relay/account-api.js',
+  'apps/relay/admin-api.js',
+  'apps/relay/credentials.js',
+  'apps/relay/sessions.js',
+  'apps/relay/agent-watchdog.js',
   'apps/relay/db.js',
   'apps/relay/legal.js',
   'apps/relay/retention.js',
@@ -94,7 +100,11 @@ const requiredFiles = [
   'scripts/update-local.js',
   'scripts/test-local-update.js',
   'scripts/test-chat-history.js',
+  'scripts/test-fsd-disconnect.js',
+  'scripts/test-web-tx.js',
   'scripts/test-push-notifications.js',
+  'scripts/test-unicom-timer.js',
+  'scripts/test-agent-watchdog.js',
   'scripts/relay-db-user.js',
   'scripts/relay-backup.js',
   'scripts/test-relay-backup.js',
@@ -106,6 +116,7 @@ const requiredFiles = [
   'scripts/check-admin-mfa-live.js',
   'scripts/check-remote-preview.js',
   'scripts/test-remote-preview.js',
+  'scripts/test-webapp-regressions.js',
   'scripts/preview-site.js',
   'webapp/index.html',
   'webapp/setup.html',
@@ -119,6 +130,7 @@ const requiredFiles = [
   'webapp/setup.css',
   'webapp/site.js',
   'webapp/auth.js',
+  'webapp/account.js',
   'webapp/styles.css',
   'webapp/app.js',
   'webapp/manifest.webmanifest',
@@ -195,6 +207,7 @@ function checkWebappReferences() {
   const terms = fs.readFileSync(filePath('webapp/terms.html'), 'utf8');
   const login = fs.readFileSync(filePath('webapp/login.html'), 'utf8');
   const app = fs.readFileSync(filePath('webapp/app.html'), 'utf8');
+  const appScript = fs.readFileSync(filePath('webapp/app.js'), 'utf8');
   if (!landing.includes('href="site.css"') || !landing.includes('href="landing.css"')
       || !landing.includes('src="site.js"')) {
     throw new Error('landing page assets are not linked');
@@ -234,8 +247,48 @@ function checkWebappReferences() {
       || !login.includes('href="/terms"') || !login.includes('href="/privacy"')) {
     throw new Error('login page assets are not linked');
   }
-  if (!/href="styles\.css(?:\?[^"]+)?"/.test(app) || !/src="app\.js(?:\?[^"]+)?"/.test(app)) {
+  if (!/href="styles\.css(?:\?[^"]+)?"/.test(app)
+      || !/src="account\.js(?:\?[^"]+)?"/.test(app)
+      || !/src="app\.js(?:\?[^"]+)?"/.test(app)
+      || app.indexOf('src="account.js') > app.indexOf('src="app.js')) {
     throw new Error('workspace assets are not linked');
+  }
+  if (!app.includes('id="auth-login"') || !app.includes('id="auth-manual"')
+      || !app.includes('id="auth-copy"')) {
+    throw new Error('workspace account gate is incomplete');
+  }
+  for (const obsolete of ['auth-register', 'auth-account-password', 'auth-agent-token']) {
+    if (app.includes(obsolete) || appScript.includes(obsolete)) {
+      throw new Error(`duplicate workspace authentication returned: ${obsolete}`);
+    }
+  }
+  if (!app.includes('id="message-form" class="composer" autocomplete="off"')
+      || !app.includes('name="voxhf-chat-message"')
+      || !app.includes('id="settings-account-username"')
+      || !app.includes('autocomplete="username"')) {
+    throw new Error('workspace chat and credential autofill contexts are not isolated');
+  }
+  if (!app.includes('id="notification-agent-offline-confirm"')
+      || !appScript.includes('confirmNotificationAgentOffline(')
+      || appScript.includes('Enable PC / Proxy Offline Alerts?\\n\\n')) {
+    throw new Error('custom PC/proxy offline confirmation is incomplete');
+  }
+}
+
+function checkWebappCssReferences() {
+  const webappDir = filePath('webapp');
+  const source = fs.readdirSync(webappDir)
+    .filter(name => /\.(?:html|js)$/.test(name))
+    .map(name => fs.readFileSync(path.join(webappDir, name), 'utf8'))
+    .join('\n');
+
+  for (const name of ['entry.css', 'site.css', 'landing.css', 'styles.css']) {
+    const css = fs.readFileSync(path.join(webappDir, name), 'utf8');
+    const classes = new Set(Array.from(css.matchAll(/\.([A-Za-z_][A-Za-z0-9_-]*)/g), match => match[1]));
+    const unused = Array.from(classes).filter(className => (
+      !new RegExp(`(^|[^A-Za-z0-9_-])${className}([^A-Za-z0-9_-]|$)`).test(source)
+    ));
+    if (unused.length) throw new Error(`${name} has unreferenced classes: ${unused.join(', ')}`);
   }
 }
 
@@ -388,12 +441,28 @@ function checkRemoteProtocol() {
       deviceId: 'browser-12345678',
       deviceName: 'iPad Home Screen',
       appUrl: 'https://app.example/app.html',
+      notifyIvaoConnected: true,
+      notifyAgentOffline: true,
     }, 'check-notification-subscribe'),
     { source: protocol.MESSAGE_SOURCES.BROWSER }
   );
   if (!notificationSubscription.ok) {
     throw new Error(`valid notification subscription rejected: ${notificationSubscription.error}`);
   }
+
+  const invalidOnlinePreference = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE, {
+      endpoint: 'https://push.example/subscription/123',
+      p256dh: 'P256DH_123456789',
+      auth: 'AUTH_123456789',
+      deviceId: 'browser-12345678',
+      deviceName: 'iPad Home Screen',
+      appUrl: 'https://app.example/app.html',
+      notifyIvaoConnected: 'yes',
+    }, 'check-notification-online-invalid'),
+    { source: protocol.MESSAGE_SOURCES.BROWSER }
+  );
+  if (invalidOnlinePreference.ok) throw new Error('invalid online notification preference accepted');
 
   const forgedNotificationSubscription = protocol.validateRemoteMessage(
     protocol.createRemoteMessage(protocol.MESSAGE_TYPES.NOTIFICATION_SUBSCRIBE, {
@@ -408,6 +477,60 @@ function checkRemoteProtocol() {
   );
   if (forgedNotificationSubscription.ok) throw new Error('notification.subscribe accepted from agent source');
 
+  const watchdogTicketMessage = protocol.createRemoteMessage(protocol.MESSAGE_TYPES.AGENT_WATCHDOG_TICKET, {
+      sessionId: 'flight-session-12345678',
+      batchId: 'watchdog-batch-12345678',
+      ticket: {
+        deviceId: 'browser-12345678',
+        endpoint: 'https://fcm.googleapis.com/wp/example',
+        expiresAt: '2026-08-02T12:15:00.000Z',
+        authorization: 'vapid signed-proxy-request-123456789',
+        contentEncoding: 'aes128gcm',
+        body: Buffer.from('encrypted-push-payload').toString('base64url'),
+      },
+    }, 'check-watchdog-ticket');
+  const watchdogTicket = protocol.validateRemoteMessage(
+    watchdogTicketMessage,
+    { source: protocol.MESSAGE_SOURCES.AGENT }
+  );
+  if (!watchdogTicket.ok) throw new Error(`valid agent watchdog ticket rejected: ${watchdogTicket.error}`);
+
+  const watchdogCommit = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.AGENT_WATCHDOG_COMMIT, {
+      sessionId: 'flight-session-12345678',
+      batchId: 'watchdog-batch-12345678',
+    }, 'check-watchdog-commit'),
+    { source: protocol.MESSAGE_SOURCES.AGENT }
+  );
+  if (!watchdogCommit.ok) throw new Error(`valid agent watchdog commit rejected: ${watchdogCommit.error}`);
+
+  const watchdogDisarm = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.AGENT_WATCHDOG_DISARM, {
+      sessionId: 'flight-session-12345678',
+    }, 'check-watchdog-disarm'),
+    { source: protocol.MESSAGE_SOURCES.AGENT }
+  );
+  if (!watchdogDisarm.ok) throw new Error(`valid agent watchdog disarm rejected: ${watchdogDisarm.error}`);
+
+  const watchdogFiredMessage = protocol.createRemoteMessage(protocol.MESSAGE_TYPES.AGENT_WATCHDOG_FIRED, {
+      sessionId: 'flight-session-12345678',
+    }, 'check-watchdog-fired');
+  const watchdogFired = protocol.validateRemoteMessage(
+    watchdogFiredMessage,
+    { source: protocol.MESSAGE_SOURCES.RELAY }
+  );
+  if (!watchdogFired.ok) throw new Error(`valid agent watchdog receipt rejected: ${watchdogFired.error}`);
+
+  const forgedWatchdogTicket = protocol.validateRemoteMessage(watchdogTicketMessage, {
+    source: protocol.MESSAGE_SOURCES.BROWSER,
+  });
+  if (forgedWatchdogTicket.ok) throw new Error('agent watchdog ticket accepted from browser source');
+
+  const forgedWatchdogReceipt = protocol.validateRemoteMessage(watchdogFiredMessage, {
+    source: protocol.MESSAGE_SOURCES.AGENT,
+  });
+  if (forgedWatchdogReceipt.ok) throw new Error('agent watchdog receipt accepted from agent source');
+
   const notificationState = protocol.validateRemoteMessage(
     protocol.createRemoteMessage(protocol.MESSAGE_TYPES.NOTIFICATION_STATE, {
       available: true,
@@ -417,6 +540,37 @@ function checkRemoteProtocol() {
     { source: protocol.MESSAGE_SOURCES.AGENT }
   );
   if (!notificationState.ok) throw new Error(`valid notification state rejected: ${notificationState.error}`);
+
+  const unicomTimerStart = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.UNICOM_TIMER_START, {}, 'check-unicom-timer-start'),
+    { source: protocol.MESSAGE_SOURCES.BROWSER }
+  );
+  if (!unicomTimerStart.ok) throw new Error(`valid UNICOM timer start rejected: ${unicomTimerStart.error}`);
+
+  const unicomTimerState = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.UNICOM_TIMER_STATE, {
+      active: true,
+      startedAt: '2026-08-01T12:00:00.000Z',
+      expiresAt: '2026-08-01T12:03:00.000Z',
+    }, 'check-unicom-timer-state'),
+    { source: protocol.MESSAGE_SOURCES.AGENT }
+  );
+  if (!unicomTimerState.ok) throw new Error(`valid UNICOM timer state rejected: ${unicomTimerState.error}`);
+
+  const forgedUnicomTimerState = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.UNICOM_TIMER_STATE, { active: false }, 'check-forged-unicom-timer-state'),
+    { source: protocol.MESSAGE_SOURCES.BROWSER }
+  );
+  if (forgedUnicomTimerState.ok) throw new Error('unicom.timer.state accepted from browser source');
+
+  const invalidInactiveUnicomTimer = protocol.validateRemoteMessage(
+    protocol.createRemoteMessage(protocol.MESSAGE_TYPES.UNICOM_TIMER_STATE, {
+      active: false,
+      expiresAt: '2026-08-01T12:03:00.000Z',
+    }, 'check-invalid-unicom-timer-state'),
+    { source: protocol.MESSAGE_SOURCES.AGENT }
+  );
+  if (invalidInactiveUnicomTimer.ok) throw new Error('inactive UNICOM timer accepted stale expiry fields');
 
   if (protocol.compareVersions('0.1.1', '0.1.0') <= 0) throw new Error('newer version comparison failed');
   if (protocol.compareVersions('0.1.0-alpha.1', '0.1.0') >= 0) throw new Error('prerelease comparison failed');
@@ -440,13 +594,30 @@ function checkProxyPrivacyGuards() {
 
 function checkHostedSecurityGuards() {
   const relay = fs.readFileSync(filePath('apps/relay/index.js'), 'utf8');
+  const accountApi = fs.readFileSync(filePath('apps/relay/account-api.js'), 'utf8');
+  const adminApi = fs.readFileSync(filePath('apps/relay/admin-api.js'), 'utf8');
+  const credentials = fs.readFileSync(filePath('apps/relay/credentials.js'), 'utf8');
+  const sessions = fs.readFileSync(filePath('apps/relay/sessions.js'), 'utf8');
+  const watchdog = fs.readFileSync(filePath('apps/relay/agent-watchdog.js'), 'utf8');
   const caddy = fs.readFileSync(filePath('infra/docker/Caddyfile'), 'utf8');
   const compose = fs.readFileSync(filePath('infra/docker/docker-compose.yml'), 'utf8');
   const packager = fs.readFileSync(filePath('scripts/prepare-release.js'), 'utf8');
   const workspace = fs.readFileSync(filePath('webapp/app.html'), 'utf8');
 
-  for (const guard of ['validateApiRequest(req)', 'allowHttpAttempt(req, res', "'retry-after'"]) {
-    if (!relay.includes(guard)) throw new Error(`relay HTTP guard is missing: ${guard}`);
+  if (!relay.includes("'retry-after'")) throw new Error('relay HTTP rate-limit response is missing Retry-After');
+  for (const [name, source, guards] of [
+    ['account', accountApi, ['validateRequest(req)', 'allowAttempt(req, res']],
+    ['admin', adminApi, ['validateApiRequest(req)', 'allowHttpAttempt(req, res']],
+  ]) {
+    for (const guard of guards) {
+      if (!source.includes(guard)) throw new Error(`${name} API HTTP guard is missing: ${guard}`);
+    }
+  }
+  for (const guard of ["'HttpOnly'", "sameSite: 'Lax'", "sameSite: 'Strict'", "'x-forwarded-proto'"]) {
+    if (!sessions.includes(guard)) throw new Error(`relay session security guard is missing: ${guard}`);
+  }
+  if (!credentials.includes('crypto.timingSafeEqual')) {
+    throw new Error('relay credential comparison is no longer constant-time');
   }
   for (const header of ['Strict-Transport-Security', 'Content-Security-Policy', 'Permissions-Policy', 'X-Frame-Options']) {
     if (!caddy.includes(header)) throw new Error(`hosted security header is missing: ${header}`);
@@ -459,6 +630,12 @@ function checkHostedSecurityGuards() {
   }
   if (!packager.includes("'private'")) {
     throw new Error('release packager no longer excludes private deployment files');
+  }
+  if (/require\(['"](?:fs|better-sqlite3|\.\/db)['"]\)/.test(watchdog)) {
+    throw new Error('agent watchdog tickets must remain memory-only');
+  }
+  if (!watchdog.includes("redirect: 'error'") || !watchdog.includes('isAllowedPushEndpoint')) {
+    throw new Error('agent watchdog push destination guards are missing');
   }
 }
 
@@ -493,6 +670,7 @@ check('proxy FSD proxy syntax', () => checkNodeSyntax('proxy/fsd-proxy.js'));
 check('proxy fsd parser syntax', () => checkNodeSyntax('proxy/fsd-parser.js'));
 check('proxy local web server syntax', () => checkNodeSyntax('proxy/local-web-server.js'));
 check('proxy push notifications syntax', () => checkNodeSyntax('proxy/push-notifications.js'));
+check('proxy UNICOM timer syntax', () => checkNodeSyntax('proxy/unicom-timer.js'));
 check('proxy ogg-speex syntax', () => checkNodeSyntax('proxy/ogg-speex.js'));
 check('proxy pilot bridge syntax', () => checkNodeSyntax('proxy/pilot-bridge.js'));
 check('proxy pilot core syntax', () => checkNodeSyntax('proxy/pilot-core.js'));
@@ -504,6 +682,11 @@ check('proxy TS2 voice proxy syntax', () => checkNodeSyntax('proxy/ts2-voice-pro
 check('proxy web tx syntax', () => checkNodeSyntax('proxy/web-tx.js'));
 check('proxy websocket commands syntax', () => checkNodeSyntax('proxy/websocket-commands.js'));
 check('relay syntax', () => checkNodeSyntax('apps/relay/index.js'));
+check('relay account API syntax', () => checkNodeSyntax('apps/relay/account-api.js'));
+check('relay admin API syntax', () => checkNodeSyntax('apps/relay/admin-api.js'));
+check('relay credentials syntax', () => checkNodeSyntax('apps/relay/credentials.js'));
+check('relay sessions syntax', () => checkNodeSyntax('apps/relay/sessions.js'));
+check('relay agent watchdog syntax', () => checkNodeSyntax('apps/relay/agent-watchdog.js'));
 check('relay db syntax', () => checkNodeSyntax('apps/relay/db.js'));
 check('relay legal configuration syntax', () => checkNodeSyntax('apps/relay/legal.js'));
 check('relay retention syntax', () => checkNodeSyntax('apps/relay/retention.js'));
@@ -519,7 +702,11 @@ check('release version setter syntax', () => checkNodeSyntax('scripts/set-releas
 check('local updater syntax', () => checkNodeSyntax('scripts/update-local.js'));
 check('local updater test syntax', () => checkNodeSyntax('scripts/test-local-update.js'));
 check('chat history test syntax', () => checkNodeSyntax('scripts/test-chat-history.js'));
+check('FSD disconnect test syntax', () => checkNodeSyntax('scripts/test-fsd-disconnect.js'));
+check('Web TX readiness test syntax', () => checkNodeSyntax('scripts/test-web-tx.js'));
 check('push notification test syntax', () => checkNodeSyntax('scripts/test-push-notifications.js'));
+check('UNICOM timer test syntax', () => checkNodeSyntax('scripts/test-unicom-timer.js'));
+check('relay agent watchdog test syntax', () => checkNodeSyntax('scripts/test-agent-watchdog.js'));
 check('relay database user helper syntax', () => checkNodeSyntax('scripts/relay-db-user.js'));
 check('relay backup syntax', () => checkNodeSyntax('scripts/relay-backup.js'));
 check('relay backup test syntax', () => checkNodeSyntax('scripts/test-relay-backup.js'));
@@ -532,10 +719,15 @@ check('site preview syntax', () => checkNodeSyntax('scripts/preview-site.js'));
 check('relay MFA preflight syntax', () => checkNodeSyntax('scripts/check-admin-mfa-live.js'));
 check('remote preflight syntax', () => checkNodeSyntax('scripts/check-remote-preview.js'));
 check('remote simulation syntax', () => checkNodeSyntax('scripts/test-remote-preview.js'));
+check('webapp regression test syntax', () => checkNodeSyntax('scripts/test-webapp-regressions.js'));
 check('remote protocol syntax', () => checkNodeSyntax('packages/protocol/index.js'));
 check('remote protocol rules', checkRemoteProtocol);
 check('chat history behavior', () => runNodeScript('scripts/test-chat-history.js'));
+check('FSD disconnect notification policy', () => runNodeScript('scripts/test-fsd-disconnect.js'));
+check('Web TX readiness across UDP flows', () => runNodeScript('scripts/test-web-tx.js'));
 check('push notification behavior', () => runNodeScript('scripts/test-push-notifications.js'));
+check('UNICOM three-minute timer behavior', () => runNodeScript('scripts/test-unicom-timer.js'));
+check('relay agent-offline watchdog behavior', () => runNodeScript('scripts/test-agent-watchdog.js'));
 check('relay database migrations', () => runNodeScript('scripts/test-relay-db.js'));
 check('setup configuration generation', () => runNodeScript('scripts/test-setup.js'));
 check('relay database auth', () => runNodeScript('scripts/test-relay-db-auth.js'));
@@ -543,13 +735,16 @@ check('relay database user helper', () => runNodeScript('scripts/test-relay-db-u
 check('relay backup and restore', () => runNodeScript('scripts/test-relay-backup.js'));
 check('relay admin api', () => runNodeScript('scripts/test-relay-admin.js'));
 check('relay account api', () => runNodeScript('scripts/test-relay-account.js'));
+check('webapp browser-state regressions', () => runNodeScript('scripts/test-webapp-regressions.js'));
 check('proxy privacy guards', checkProxyPrivacyGuards);
 check('hosted security guards', checkHostedSecurityGuards);
 check('dependency licenses', checkDependencyLicenses);
 check('webapp asset references', checkWebappReferences);
+check('webapp CSS class references', checkWebappCssReferences);
 check('webapp script syntax', () => checkNodeSyntax('webapp/app.js'));
 check('webapp service worker syntax', () => checkNodeSyntax('webapp/sw.js'));
-check('account script syntax', () => checkNodeSyntax('webapp/auth.js'));
+check('workspace account script syntax', () => checkNodeSyntax('webapp/account.js'));
+check('account entry script syntax', () => checkNodeSyntax('webapp/auth.js'));
 check('public site script syntax', () => checkNodeSyntax('webapp/site.js'));
 check('relay admin asset references', checkAdminReferences);
 check('relay admin script syntax', () => checkNodeSyntax('apps/relay/admin.js'));

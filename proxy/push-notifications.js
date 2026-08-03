@@ -7,12 +7,13 @@ const path = require('path');
 const STORE_VERSION = 1;
 const MAX_SUBSCRIPTIONS = 32;
 const RECENT_MESSAGE_TTL_MS = 30_000;
+const WATCHDOG_TICKET_LIFETIME_MS = 15 * 60 * 1000;
 const VAPID_SUBJECT = 'https://github.com/leledeste/voxhf';
 
 function createPushNotifications(options = {}) {
   // Web Push credentials and device subscriptions belong to the local proxy.
-  // The relay may transport a subscription to this module, but it never needs
-  // to retain it or send a notification on the proxy's behalf.
+  // The optional offline watchdog gives the relay only a short-lived request
+  // that is already encrypted and signed; the relay never receives these keys.
   const webPush = options.webPush || require('web-push');
   const logger = options.logger || console;
   const now = options.now || Date.now;
@@ -64,22 +65,111 @@ function createPushNotifications(options = {}) {
     return { ok: true, removed: before - store.subscriptions.length, subscriptionCount: store.subscriptions.length };
   }
 
-  async function notifyForMessage(message, callsign) {
+  async function notifyForMessage(message, callsign, deliveryOptions = {}) {
     const trigger = notificationTrigger(message, callsign);
     if (!trigger || !store.subscriptions.length) return { matched: Boolean(trigger), sent: 0 };
+    if (deliveryOptions.suppressStartupServer === true && isIvaoServerMessage(message)) {
+      return { matched: true, sent: 0, suppressed: 'ivao-startup-server' };
+    }
 
     cleanupRecentMessages(recentMessages, now());
     const signature = messageSignature(trigger, message, callsign);
     if (recentMessages.has(signature)) return { matched: true, sent: 0, duplicate: true };
     recentMessages.set(signature, now());
 
+    const delivery = await deliverNotifications(
+      subscription => notificationPayload(trigger, message, callsign, subscription.appUrl),
+      300,
+    );
+    return { matched: true, ...delivery };
+  }
+
+  async function notifyIvaoDisconnected(callsign) {
+    return deliverNotifications(
+      subscription => ivaoDisconnectPayload(callsign, subscription.appUrl),
+      30 * 60,
+    );
+  }
+
+  async function notifyIvaoConnected(callsign) {
+    return deliverNotifications(
+      subscription => ivaoConnectedPayload(callsign, subscription.appUrl),
+      300,
+      subscription => subscription.notifyIvaoConnected === true,
+    );
+  }
+
+  async function notifyUnicomTimerExpired(callsign) {
+    return deliverNotifications(
+      subscription => unicomTimerPayload(callsign, subscription.appUrl),
+      300,
+    );
+  }
+
+  function createAgentOfflineWatchdogTickets(callsign) {
+    const expiresAtMs = Number(now()) + WATCHDOG_TICKET_LIFETIME_MS;
+    const expiresAt = new Date(expiresAtMs).toISOString();
+    return store.subscriptions
+      .filter(subscription => subscription.notifyAgentOffline === true)
+      .map((subscription) => {
+        try {
+          const details = webPush.generateRequestDetails(
+            pushSubscription(subscription),
+            JSON.stringify(agentOfflinePayload(callsign, subscription.appUrl)),
+            { TTL: 300, urgency: 'high' },
+          );
+          const body = Buffer.isBuffer(details.body) ? details.body : Buffer.from(details.body || '');
+          const contentEncoding = String(details.headers?.['Content-Encoding'] || '').toLowerCase();
+          const vapidHeaders = webPush.getVapidHeaders(
+            new URL(details.endpoint).origin,
+            VAPID_SUBJECT,
+            store.vapid.publicKey,
+            store.vapid.privateKey,
+            contentEncoding,
+            Math.floor(expiresAtMs / 1000),
+          );
+          const authorization = String(vapidHeaders.Authorization || '');
+          if (!body.length || !authorization || contentEncoding !== 'aes128gcm') return null;
+          return {
+            deviceId: subscription.deviceId,
+            endpoint: details.endpoint,
+            expiresAt,
+            authorization,
+            contentEncoding,
+            body: body.toString('base64url'),
+          };
+        } catch (_) {
+          logger.warn('[WATCHDOG] Could not prepare an offline alert ticket for one subscribed device.');
+          return null;
+        }
+      })
+      .filter(Boolean);
+  }
+
+  async function deliverNotifications(makePayload, ttlSeconds, includeSubscription = () => true) {
+    if (!store.subscriptions.length) {
+      return { sent: 0, failed: 0, expired: 0, subscriptionCount: 0, targetCount: 0 };
+    }
+
+    const targets = store.subscriptions.filter(includeSubscription);
+    if (!targets.length) {
+      return {
+        sent: 0,
+        failed: 0,
+        expired: 0,
+        subscriptionCount: store.subscriptions.length,
+        targetCount: 0,
+      };
+    }
+
     const expired = new Set();
     let sent = 0;
-    await Promise.all(store.subscriptions.map(async (subscription) => {
-      const payload = JSON.stringify(notificationPayload(trigger, message, callsign, subscription.appUrl));
+    let failed = 0;
+    await Promise.all(targets.map(async (subscription) => {
+      const payload = JSON.stringify(makePayload(subscription));
       try {
         await webPush.sendNotification(pushSubscription(subscription), payload, {
-          TTL: 300,
+          TTL: ttlSeconds,
           urgency: 'high',
         });
         sent += 1;
@@ -89,6 +179,7 @@ function createPushNotifications(options = {}) {
           expired.add(subscription.endpoint);
           return;
         }
+        failed += 1;
         logger.warn(`[PUSH] Delivery failed${status ? ` (HTTP ${status})` : ''}.`);
       }
     }));
@@ -98,13 +189,23 @@ function createPushNotifications(options = {}) {
       persistStore(storageFile, store);
     }
     if (sent) logger.log(`[PUSH] Notification delivered to ${sent} device${sent === 1 ? '' : 's'}.`);
-    return { matched: true, sent, expired: expired.size };
+    return {
+      sent,
+      failed,
+      expired: expired.size,
+      subscriptionCount: store.subscriptions.length,
+      targetCount: targets.length,
+    };
   }
 
   return {
     addSubscription,
+    createAgentOfflineWatchdogTickets,
     getPublicState,
+    notifyIvaoConnected,
+    notifyIvaoDisconnected,
     notifyForMessage,
+    notifyUnicomTimerExpired,
     removeSubscription,
   };
 }
@@ -159,6 +260,70 @@ function notificationPayload(trigger, message, callsign, appUrl) {
   };
 }
 
+function ivaoDisconnectPayload(callsign, appUrl) {
+  const own = normalizeCallsign(callsign);
+  const navigate = normalizeAppUrl(appUrl) || 'https://app.voxhf.com/';
+  return {
+    web_push: 8030,
+    notification: {
+      title: own ? `IVAO disconnected - ${own}` : 'IVAO disconnected',
+      body: 'VoxHF lost the IVAO connection. Reconnect Altitude as soon as possible.',
+      navigate,
+      silent: false,
+      tag: 'voxhf-ivao-disconnected',
+    },
+  };
+}
+
+function ivaoConnectedPayload(callsign, appUrl) {
+  const own = normalizeCallsign(callsign);
+  const navigate = normalizeAppUrl(appUrl) || 'https://app.voxhf.com/';
+  return {
+    web_push: 8030,
+    notification: {
+      title: own ? `IVAO online - ${own}` : 'IVAO online',
+      body: 'VoxHF notifications are active on this device.',
+      navigate,
+      silent: false,
+      tag: 'voxhf-ivao-connected',
+    },
+  };
+}
+
+function unicomTimerPayload(callsign, appUrl) {
+  const own = normalizeCallsign(callsign);
+  const navigate = normalizeAppUrl(appUrl) || 'https://app.voxhf.com/';
+  return {
+    web_push: 8030,
+    notification: {
+      title: own ? `Timer expired - ${own}` : 'Timer expired',
+      body: 'You can now disconnect and report the leg.',
+      navigate,
+      silent: false,
+      tag: 'voxhf-unicom-timer',
+    },
+  };
+}
+
+function agentOfflinePayload(callsign, appUrl) {
+  const own = normalizeCallsign(callsign);
+  const navigate = normalizeAppUrl(appUrl) || 'https://app.voxhf.com/';
+  return {
+    web_push: 8030,
+    notification: {
+      title: own ? `VoxHF agent offline - ${own}` : 'VoxHF agent offline',
+      body: 'The local VoxHF proxy is no longer reachable.',
+      navigate,
+      silent: false,
+      tag: 'voxhf-agent-offline',
+    },
+  };
+}
+
+function isIvaoServerMessage(message) {
+  return message?.direction !== 'outgoing' && normalizeCallsign(message?.sender) === 'SERVER';
+}
+
 function normalizeSubscription(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const endpoint = String(value.endpoint || '').trim();
@@ -167,6 +332,8 @@ function normalizeSubscription(value) {
   const deviceId = String(value.deviceId || '').trim();
   const deviceName = String(value.deviceName || 'Browser device').trim().slice(0, 80);
   const appUrl = normalizeAppUrl(value.appUrl);
+  const notifyIvaoConnected = value.notifyIvaoConnected === true;
+  const notifyAgentOffline = value.notifyAgentOffline === true;
   if (!validPushEndpoint(endpoint) || !validPushKey(p256dh) || !validPushKey(auth)) return null;
   if (deviceId && !/^[A-Za-z0-9._:-]{8,160}$/.test(deviceId)) return null;
   if (!appUrl) return null;
@@ -176,6 +343,8 @@ function normalizeSubscription(value) {
     deviceId: deviceId || crypto.createHash('sha256').update(endpoint).digest('hex').slice(0, 32),
     deviceName: deviceName || 'Browser device',
     appUrl,
+    notifyIvaoConnected,
+    notifyAgentOffline,
   };
 }
 
@@ -277,7 +446,12 @@ function validVapid(value) {
 }
 
 module.exports = {
+  agentOfflinePayload,
   createPushNotifications,
+  ivaoConnectedPayload,
+  ivaoDisconnectPayload,
+  isIvaoServerMessage,
   notificationTrigger,
   textAddressesCallsign,
+  unicomTimerPayload,
 };

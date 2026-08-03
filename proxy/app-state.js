@@ -3,6 +3,10 @@
 const { normalizeSquawkCode } = require('./fsd-parser');
 const { formatComFrequency } = require('./pilot-core');
 
+const FLIGHT_TELEMETRY_MAX_AGE_MS = 20_000;
+const STATIONARY_SAMPLE_COUNT = 2;
+const STATIONARY_MAX_GROUNDSPEED_KT = 5;
+
 function createAppState(options) {
   // This object is the local source of truth for UI-visible simulator state.
   // Network modules update it through small methods, and it emits typed events
@@ -23,6 +27,8 @@ function createAppState(options) {
   let flightPlan = { departure: '', destination: '', alternate: '' };
   let weatherState = createEmptyWeatherState(flightPlan);
   let ownPosition = null;
+  let flightTelemetry = null;
+  let stationarySamples = 0;
 
   function broadcast(data) {
     // Recording chat history here keeps reconnect snapshots consistent no
@@ -211,6 +217,21 @@ function createAppState(options) {
   function rememberFsdState(msg) {
     if (msg.kind === 'own_position') {
       ownPosition = { lat: msg.lat, lon: msg.lon };
+      const rawGroundSpeed = msg.groundSpeed;
+      const groundSpeed = rawGroundSpeed !== null
+        && rawGroundSpeed !== undefined
+        && String(rawGroundSpeed).trim() !== ''
+        && Number.isFinite(Number(rawGroundSpeed))
+        ? Number(rawGroundSpeed)
+        : null;
+      stationarySamples = groundSpeed !== null && groundSpeed <= STATIONARY_MAX_GROUNDSPEED_KT
+        ? stationarySamples + 1
+        : 0;
+      flightTelemetry = {
+        groundSpeed,
+        stationarySamples,
+        observedAt: String(msg.timestamp || timestamp()),
+      };
       updateXpdrState(msg);
       return;
     }
@@ -223,6 +244,11 @@ function createAppState(options) {
         channelName: msg.channelName,
       });
     }
+  }
+
+  function resetFlightTelemetry() {
+    flightTelemetry = null;
+    stationarySamples = 0;
   }
 
   function getStatus() {
@@ -285,6 +311,7 @@ function createAppState(options) {
     getStationsState,
     getMessageLog,
     getInitState,
+    getFlightTelemetry: () => flightTelemetry ? { ...flightTelemetry } : null,
     setConnected,
     setCallsign,
     updateComFrequency,
@@ -294,7 +321,31 @@ function createAppState(options) {
     roleForWeatherIcao,
     rememberFsdState,
     rememberStation,
+    resetFlightTelemetry,
   };
+}
+
+function disconnectAlertSuppressionReason(telemetry, now = Date.now()) {
+  // Require two fresh samples so a single zero-speed packet during motion does
+  // not silence a real disconnect. Unknown telemetry deliberately returns no
+  // suppression reason and therefore lets the caller notify.
+  if (!telemetry || typeof telemetry !== 'object') return '';
+  const observedAt = Date.parse(String(telemetry.observedAt || ''));
+  const age = Number(now) - observedAt;
+  if (!Number.isFinite(observedAt) || !Number.isFinite(age) || age < 0 || age > FLIGHT_TELEMETRY_MAX_AGE_MS) {
+    return '';
+  }
+
+  const groundSpeed = Number(telemetry.groundSpeed);
+  const samples = Number(telemetry.stationarySamples);
+  if (
+    Number.isFinite(groundSpeed)
+    && groundSpeed <= STATIONARY_MAX_GROUNDSPEED_KT
+    && samples >= STATIONARY_SAMPLE_COUNT
+  ) {
+    return `aircraft stationary at ${Math.round(groundSpeed)} kt`;
+  }
+  return '';
 }
 
 function createEmptyWeatherState(flightPlan) {
@@ -333,4 +384,5 @@ function normalizeIcao(value) {
 
 module.exports = {
   createAppState,
+  disconnectAlertSuppressionReason,
 };

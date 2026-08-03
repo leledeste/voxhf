@@ -7,8 +7,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="VoxHF">
   <title>Workspace | VoxHF</title>
-  <link rel="manifest" href="manifest.webmanifest?v=20260729-2">
-  <link rel="stylesheet" href="styles.css?v=20260729-2">
+  <link rel="manifest" href="manifest.webmanifest?v=20260802-4">
+  <link rel="stylesheet" href="styles.css?v=20260803-1">
 </head>
 <body>
   <div class="app">
@@ -55,6 +55,13 @@
           <div class="surface-heading">
             <div><span class="eyebrow">Voice</span><h1>Radios</h1></div>
           </div>
+          <button id="rx-activation-prompt" class="rx-activation-prompt hidden" type="button">
+            <span class="rx-activation-mark" aria-hidden="true">RX</span>
+            <span class="rx-activation-copy">
+              <strong>Tap to activate RX</strong>
+              <small>Required after opening VoxHF on iPhone or iPad.</small>
+            </span>
+          </button>
           <div class="radio-stack">
             <article class="radio">
               <div class="radio-header">
@@ -113,26 +120,31 @@
       <section id="communications" class="work surface" aria-label="Communications">
         <div class="toolbar">
           <div class="workspace-title"><span class="eyebrow">Network</span><h1>Communications</h1></div>
-          <div class="tabs" role="tablist" aria-label="Message filters">
-            <button id="tab-all" class="tab active" data-filter="all" type="button">All</button>
-            <button id="tab-frequency" class="tab" data-filter="frequency" type="button">Frequency</button>
-            <button id="tab-private" class="tab" data-filter="private" type="button">Private</button>
-            <button id="tab-system" class="tab" data-filter="system" type="button">System</button>
+          <div class="toolbar-actions">
+            <button id="unicom-timer-toggle" class="unicom-timer-button" type="button" aria-label="Start three-minute UNICOM timer" aria-pressed="false">
+              <span class="unicom-timer-copy"><small>UNICOM</small><strong id="unicom-timer-display">Start 3:00</strong></span>
+            </button>
+            <div class="tabs" role="tablist" aria-label="Message filters">
+              <button id="tab-all" class="tab active" data-filter="all" type="button">All</button>
+              <button id="tab-frequency" class="tab" data-filter="frequency" type="button">Frequency</button>
+              <button id="tab-private" class="tab" data-filter="private" type="button">Private</button>
+              <button id="tab-system" class="tab" data-filter="system" type="button">System</button>
+            </div>
           </div>
         </div>
         <div id="messages" class="messages"></div>
-        <footer class="composer">
-          <select id="recipient" aria-label="Message recipient">
+        <form id="message-form" class="composer" autocomplete="off">
+          <select id="recipient" name="voxhf-recipient" aria-label="Message recipient">
             <option id="recipient-frequency" value="@22800">UNICOM / frequency</option>
             <option value="*">Broadcast</option>
             <option id="recipient-custom" value="custom">Custom...</option>
           </select>
           <div class="composer-field">
-            <input id="message-input" autocomplete="off" placeholder="Message or command: .metar LIMC, .taf LIRF, .chat CALLSIGN">
+            <input id="message-input" name="voxhf-chat-message" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Chat message or command" placeholder="Message or command: .metar LIMC, .taf LIRF, .chat CALLSIGN">
             <div id="command-menu" class="command-menu hidden" role="listbox" aria-label="Command suggestions"></div>
           </div>
-          <button id="send" class="send" type="button">Send</button>
-        </footer>
+          <button id="send" class="send" type="submit">Send</button>
+        </form>
       </section>
 
       <aside id="route-weather" class="info-rail surface" aria-label="Route information">
@@ -143,6 +155,7 @@
       </aside>
     </main>
   </div>
+
   <!-- Connection overlay. It is shown when the proxy or Altitude/FSD side is
        not ready, but the page keeps trying to recover in the background. -->
   <div id="overlay" class="overlay">
@@ -156,40 +169,14 @@
   </div>
 
   <div id="auth-overlay" class="auth-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-    <div class="auth-panel">
+    <div class="dialog auth-gate">
       <div>
         <h1 id="auth-title">VoxHF Remote</h1>
-        <p>Sign in to your hosted relay account or create a new one.</p>
+        <p id="auth-copy">Sign in with your hosted account, or configure a private relay manually.</p>
       </div>
-      <div class="auth-form">
-        <label>
-          Relay URL
-          <input id="auth-remote-url" autocomplete="off" placeholder="wss://relay.voxhf.com">
-        </label>
-        <label>
-          Username
-          <input id="auth-account-user" autocomplete="username" placeholder="username">
-        </label>
-        <label>
-          Display Name <span class="label-note">Register only</span>
-          <input id="auth-account-name" autocomplete="name" placeholder="Display name">
-        </label>
-        <label>
-          Password
-          <input id="auth-account-password" type="password" autocomplete="current-password" placeholder="Password">
-        </label>
-        <label>
-          Invitation Code <span class="label-note">Register only</span>
-          <input id="auth-account-invite" autocomplete="one-time-code" spellcheck="false" placeholder="VHF-...">
-        </label>
-      </div>
-      <div id="auth-status" class="auth-status">Log in on each browser. Register once, then copy the agent token to the Altitude PC.</div>
-      <div id="auth-agent-token" class="agent-token-box hidden"></div>
-      <div class="auth-actions">
-        <button id="auth-login" type="button">Login</button>
-        <button id="auth-register" type="button">Register</button>
-        <button id="auth-continue" class="wide hidden" type="button">Continue</button>
-        <button id="auth-manual" class="wide" type="button">Manual Relay Setup</button>
+      <div class="dialog-actions auth-gate-actions">
+        <button id="auth-login" class="auth-primary" type="button">Sign In / Register</button>
+        <button id="auth-manual" type="button">Manual Relay Setup</button>
       </div>
     </div>
   </div>
@@ -347,6 +334,7 @@
               <button id="settings-account-revoke-others" type="button">Logout Other Devices</button>
             </div>
             <form id="settings-account-password-form" class="settings-form account-password-form">
+              <input id="settings-account-username" class="credential-username" name="username" type="text" autocomplete="username" tabindex="-1" aria-hidden="true">
               <label>Current password<input id="settings-account-current-password" type="password" autocomplete="current-password"></label>
               <label>New password<input id="settings-account-new-password" type="password" autocomplete="new-password" minlength="10"></label>
               <label>Confirm password<input id="settings-account-confirm-password" type="password" autocomplete="new-password" minlength="10"></label>
@@ -387,9 +375,17 @@
               <span class="setting-label">Saved Devices</span>
               <span id="settings-notification-count" class="setting-value">0</span>
             </div>
+            <label class="setting-row setting-checkbox-row" for="settings-notifications-online">
+              <span class="setting-label">IVAO Online Confirmation</span>
+              <input id="settings-notifications-online" class="setting-checkbox" type="checkbox">
+            </label>
+            <label class="setting-row setting-checkbox-row" for="settings-notifications-agent-offline">
+              <span class="setting-label">PC / Proxy Offline Alert</span>
+              <input id="settings-notifications-agent-offline" class="setting-checkbox" type="checkbox">
+            </label>
           </div>
           <div id="settings-notification-status" class="auth-status">
-            Enable notifications separately on every device. The local proxy sends them for private messages and ATC messages beginning with your callsign.
+            Enable notifications separately on every device. Online confirmation and the encrypted PC / proxy offline alert are optional per device.
           </div>
           <div class="settings-actions">
             <button id="settings-notifications-enable" type="button">Enable on This Device</button>
@@ -429,7 +425,32 @@
     </div>
   </div>
 
-  <script src="weather.js?v=20260729-2"></script>
-  <script src="app.js?v=20260729-2"></script>
+  <div id="notification-agent-offline-confirm" class="notification-confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="notification-agent-offline-confirm-title" aria-describedby="notification-agent-offline-confirm-description">
+    <div class="notification-confirm-panel">
+      <div class="notification-confirm-copy">
+        <span class="eyebrow">Optional remote alert</span>
+        <h1 id="notification-agent-offline-confirm-title">Notify this device if VoxHF goes offline?</h1>
+        <p id="notification-agent-offline-confirm-description">
+          During an active IVAO session, the relay can alert this device if the local proxy, simulator PC, or network path stops responding.
+        </p>
+        <div class="notification-confirm-points" aria-label="Privacy summary">
+          <div><strong>Memory only</strong><span>The relay does not save the ticket to its database or backups.</span></div>
+          <div><strong>Sealed locally</strong><span>The alert is encrypted and signed by your local VoxHF proxy.</span></div>
+          <div><strong>Short lived</strong><span>The ticket and its signature expire within 15 minutes.</span></div>
+        </div>
+        <p class="notification-confirm-note">
+          The relay receives this device's Push service address and the sealed alert, but not your VAPID private key, chat, audio, position, or flight plan. A modified relay could replay only this same alert until it expires; it cannot read or change it.
+        </p>
+      </div>
+      <div class="notification-confirm-actions">
+        <button id="notification-agent-offline-confirm-cancel" type="button">Cancel</button>
+        <button id="notification-agent-offline-confirm-enable" class="primary-action" type="button">Enable Alert</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="weather.js?v=20260802-4"></script>
+  <script src="account.js?v=20260802-5"></script>
+  <script src="app.js?v=20260803-2"></script>
 </body>
 </html>

@@ -1,10 +1,11 @@
 const XPDR_STORAGE_KEY = 'voxhf.xpdrState.v1';
 const REMOTE_STORAGE_KEY = 'voxhf.remoteSettings.v1';
 const REMOTE_BROWSER_ID_STORAGE_KEY = 'voxhf.remoteBrowserId.v1';
-const ACCOUNT_STORAGE_KEY = 'voxhf.accountSettings.v1';
 const AUTH_MANUAL_STORAGE_KEY = 'voxhf.authManualMode.v1';
 const UPDATE_NOTICE_STORAGE_KEY = 'voxhf.dismissedUpdate.v1';
 const THEME_STORAGE_KEY = 'voxhf.theme.v1';
+const NOTIFICATION_ONLINE_STORAGE_KEY = 'voxhf.notificationOnline.v1';
+const NOTIFICATION_AGENT_OFFLINE_STORAGE_KEY = 'voxhf.notificationAgentOffline.v1';
 const DEFAULT_XPDR_STATE = { squawk: '7000', mode: 'stby' };
 const MAX_VISIBLE_STATION_DISTANCE_NM = 1200;
 const WEATHER_REQUEST_TIMEOUT_MS = 20000;
@@ -32,6 +33,10 @@ const REMOTE_MESSAGE_TYPES = {
   NOTIFICATION_SUBSCRIBE: 'notification.subscribe',
   NOTIFICATION_UNSUBSCRIBE: 'notification.unsubscribe',
   NOTIFICATION_STATE: 'notification.state',
+  UNICOM_TIMER_START: 'unicom.timer.start',
+  UNICOM_TIMER_CANCEL: 'unicom.timer.cancel',
+  UNICOM_TIMER_STATE: 'unicom.timer.state',
+  UNICOM_TIMER_EXPIRED: 'unicom.timer.expired',
   WEATHER_REQUEST: 'weather.request',
   ATIS_REQUEST: 'atis.request',
   XPDR_SET_SQUAWK: 'xpdr.setSquawk',
@@ -145,7 +150,7 @@ function defaultRemoteRelay() {
 
 function loadRemoteSettings() {
   // Saved settings are local to this browser. They avoid putting relay
-  // tokens in the address bar during repeated preview tests.
+  // tokens in the address bar during repeated remote sessions.
   try {
     const saved = JSON.parse(localStorage.getItem(REMOTE_STORAGE_KEY) || '{}');
     return {
@@ -179,6 +184,38 @@ function loadAuthManualPreference() {
 function saveAuthManualPreference(enabled) {
   if (enabled) localStorage.setItem(AUTH_MANUAL_STORAGE_KEY, '1');
   else localStorage.removeItem(AUTH_MANUAL_STORAGE_KEY);
+}
+
+function loadNotificationOnlinePreference() {
+  // These choices belong to one browser installation. The subscription payload
+  // carries them to the local proxy; an account or relay never owns the setting.
+  try {
+    return localStorage.getItem(NOTIFICATION_ONLINE_STORAGE_KEY) === '1';
+  } catch (_) {
+    return false;
+  }
+}
+
+function saveNotificationOnlinePreference(enabled) {
+  try {
+    if (enabled) localStorage.setItem(NOTIFICATION_ONLINE_STORAGE_KEY, '1');
+    else localStorage.removeItem(NOTIFICATION_ONLINE_STORAGE_KEY);
+  } catch (_) {}
+}
+
+function loadNotificationAgentOfflinePreference() {
+  try {
+    return localStorage.getItem(NOTIFICATION_AGENT_OFFLINE_STORAGE_KEY) === '1';
+  } catch (_) {
+    return false;
+  }
+}
+
+function saveNotificationAgentOfflinePreference(enabled) {
+  try {
+    if (enabled) localStorage.setItem(NOTIFICATION_AGENT_OFFLINE_STORAGE_KEY, '1');
+    else localStorage.removeItem(NOTIFICATION_AGENT_OFFLINE_STORAGE_KEY);
+  } catch (_) {}
 }
 
 function loadRemoteBrowserId() {
@@ -236,115 +273,12 @@ function setRemoteCheck(status, detail = '') {
   updateSettingsView();
 }
 
-function loadAccountSettings() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(ACCOUNT_STORAGE_KEY) || '{}');
-    return {
-      userId: String(saved.userId || ''),
-      userName: String(saved.userName || ''),
-    };
-  } catch (_) {
-    return { userId: '', userName: '' };
-  }
-}
-
-function saveAccountSettings(next) {
-  localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify({
-    userId: String(next.userId || ''),
-    userName: String(next.userName || ''),
-  }));
-}
-
 function remoteRelayDraft() {
-  // Both the first-run auth screen and Settings can edit the relay base.
-  // Prefer the visible draft, then fall back to saved state and hosted
-  // app.voxhf.com -> relay.voxhf.com convention.
-  return $('auth-remote-url')?.value.trim()
-    || $('settings-remote-url')?.value.trim()
+  // Settings owns the editable relay base. Account pages and the workspace
+  // share the saved state and hosted app.voxhf.com -> relay.voxhf.com default.
+  return $('settings-remote-url')?.value.trim()
     || state.remote.relay
     || defaultRemoteRelay();
-}
-
-function applyRemoteRelayDraft(relay = remoteRelayDraft()) {
-  if (!relay) return false;
-  state.remote.enabled = true;
-  state.remote.relay = relay;
-  state.remote.url = buildRemoteWsUrl(relay, state.remote.token, state.remoteBrowserId);
-  saveRemoteSettings({
-    enabled: true,
-    relay,
-    token: state.remote.token,
-    deviceId: state.remoteSelectedDeviceId,
-    pairingCode: state.remote.pairingCode,
-  });
-  syncRemoteSettingsInputs(false);
-  return true;
-}
-
-function buildRemoteApiUrl(pathname) {
-  const relay = remoteRelayDraft();
-  if (!relay) return '';
-  try {
-    const url = new URL(relay, location.href);
-    if (url.protocol === 'ws:') url.protocol = 'http:';
-    if (url.protocol === 'wss:') url.protocol = 'https:';
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
-    url.pathname = pathname;
-    url.search = '';
-    url.hash = '';
-    return url.toString();
-  } catch (_) {
-    return '';
-  }
-}
-
-async function accountRequest(pathname, options = {}) {
-  const url = buildRemoteApiUrl(pathname);
-  if (!url) throw new Error('Remote relay URL is required.');
-  const response = await fetch(url, {
-    method: options.method || 'GET',
-    credentials: 'include',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.ok === false) {
-    const error = new Error(body.error || `HTTP ${response.status}`);
-    error.code = body.code || '';
-    error.status = response.status;
-    throw error;
-  }
-  return body;
-}
-
-async function refreshAccountStatus() {
-  if (!state.remote.enabled && !state.remote.relay) return false;
-  try {
-    const body = await accountRequest('/account/api/status');
-    state.account.statusKnown = true;
-    state.account.registrationEnabled = Boolean(body.registrationEnabled);
-    state.account.registrationRequiresInvite = body.registrationRequiresInvite !== false;
-    state.account.authenticated = Boolean(body.authenticated && body.user);
-    state.account.userId = body.user?.userId || state.account.userId || '';
-    state.account.userName = body.user?.userName || body.user?.userId || state.account.userName || '';
-    saveAccountSettings(state.account);
-    if (state.account.authenticated) await refreshAccountSessions(false);
-    else state.account.sessions = [];
-    updateSettingsView();
-    updateAuthGate();
-    return true;
-  } catch (err) {
-    // A network failure is not proof that the cookie expired. Keep the user
-    // in the workspace and let normal reconnect handling explain the outage.
-    state.account.statusKnown = false;
-    state.account.authenticated = false;
-    if (err?.code === 'account_mode_unavailable') state.account.registrationEnabled = false;
-    updateSettingsView();
-    updateAuthGate();
-    return false;
-  }
 }
 
 async function runRemotePreflight() {
@@ -581,281 +515,10 @@ function switchToLocalMode() {
   else location.replace(nextUrl);
 }
 
-function accountErrorMessage(err, action) {
-  // Server errors include a stable code; keep login generic so the hosted
-  // relay does not help enumerate accounts.
-  const fallback = action === 'register' ? 'Registration failed.' : 'Login failed.';
-  switch (err?.code) {
-    case 'account_mode_unavailable':
-      return 'Hosted accounts are not enabled on this relay. Use Manual Relay Setup.';
-    case 'registration_disabled':
-      return 'Registration is disabled on this relay. Ask the relay admin to create or enable your account.';
-    case 'invalid_invite':
-      return 'The invitation code is invalid, expired, or has already been used.';
-    case 'username_taken':
-      return 'That username is already taken. Try another one or log in.';
-    case 'invalid_username':
-      return 'Use a 2-48 character username: letters, numbers, dot, underscore, or dash.';
-    case 'invalid_display_name':
-      return 'Display name must be 1-80 characters.';
-    case 'invalid_password':
-      return 'Password must be 10-256 characters.';
-    case 'invalid_credentials':
-      return 'Username or password is incorrect. If this is your first time, register an account.';
-    case 'auth_rate_limited':
-      return 'Too many attempts. Wait a few seconds and try again.';
-    case 'not_authenticated':
-      return 'Your session expired. Log in again.';
-    default:
-      return err?.message || fallback;
-  }
-}
-
-async function registerAccount() {
-  const body = readAccountForm(true);
-  if (!body) return;
-  if (state.account.registrationEnabled === false) {
-    setAuthStatus('Registration is disabled on this relay. Log in or use Manual Relay Setup.', 'bad');
-    return;
-  }
-  if (!applyRemoteRelayDraft()) {
-    addErrorMessage('Remote relay URL is required.');
-    setAuthStatus('Remote relay URL is required.', 'bad');
-    return;
-  }
-  try {
-    const result = await accountRequest('/account/api/register', { method: 'POST', body });
-    applyAccountUser(result.user);
-    showAgentToken(result.agentToken);
-    setRemoteCheck('Account registered');
-    setAuthStatus('Account created. Copy the agent token before continuing.', 'good');
-    saveAuthManualPreference(false);
-    addLocal('Account registered. Copy the agent token into config.json on the Altitude PC.');
-  } catch (err) {
-    const message = accountErrorMessage(err, 'register');
-    setAuthStatus(message, 'bad');
-    if (!err?.code) addErrorMessage(`Account registration failed: ${message}`);
-  }
-}
-
-async function loginAccount() {
-  const body = readAccountForm(false);
-  if (!body) return;
-  if (!applyRemoteRelayDraft()) {
-    addErrorMessage('Remote relay URL is required.');
-    setAuthStatus('Remote relay URL is required.', 'bad');
-    return;
-  }
-  try {
-    const result = await accountRequest('/account/api/login', { method: 'POST', body });
-    applyAccountUser(result.user);
-    hideAgentToken();
-    setRemoteCheck('Account logged in');
-    setAuthStatus('Logged in.', 'good');
-    state.authOverlayDismissed = true;
-    saveAuthManualPreference(false);
-    hideAuthGate();
-    addLocal(`Logged in as ${state.account.userName || state.account.userId}.`);
-    connect(true);
-  } catch (err) {
-    const message = accountErrorMessage(err, 'login');
-    setAuthStatus(message, 'bad');
-    if (!err?.code) addErrorMessage(`Account login failed: ${message}`);
-  }
-}
-
-async function logoutAccount() {
-  try {
-    await accountRequest('/account/api/logout', { method: 'POST' });
-  } catch (_) {}
-  state.account.authenticated = false;
-  state.account.userId = '';
-  state.account.userName = '';
-  state.account.sessions = [];
-  saveAccountSettings(state.account);
-  renderAccountSessions();
-  hideAgentToken();
-  setRemoteCheck('Account logged out');
-  state.authOverlayDismissed = false;
-  saveAuthManualPreference(false);
-  if (state.remote.enabled && location.protocol === 'https:') {
-    openAccountPage();
-    return;
-  }
-  updateAuthGate();
-  connect(true);
-}
-
-async function rotateAccountAgentToken() {
-  try {
-    const result = await accountRequest('/account/api/agent-token/rotate', { method: 'POST' });
-    showAgentToken(result.agentToken);
-    setRemoteCheck('Agent token rotated');
-    addLocal('Agent token rotated. Update config.json and restart VoxHF on the Altitude PC.');
-  } catch (err) {
-    addErrorMessage(`Agent token rotation failed: ${accountErrorMessage(err, 'login')}`);
-  }
-}
-
-async function refreshAccountSessions(showStatus = true) {
-  if (!state.account.authenticated) {
-    state.account.sessions = [];
-    renderAccountSessions();
-    return;
-  }
-  try {
-    const result = await accountRequest('/account/api/sessions');
-    state.account.sessions = result.sessions || [];
-    renderAccountSessions();
-    if (showStatus) setAccountSecurityStatus('Sessions refreshed.', 'good');
-  } catch (err) {
-    if (showStatus) setAccountSecurityStatus(accountErrorMessage(err, 'login'), 'bad');
-  }
-}
-
-function renderAccountSessions() {
-  const list = $('settings-account-sessions');
-  if (!list) return;
-  list.replaceChildren();
-  for (const session of state.account.sessions || []) {
-    const row = document.createElement('div');
-    row.className = 'account-session-row';
-    const copy = document.createElement('div');
-    const title = document.createElement('strong');
-    title.textContent = session.current ? 'This browser' : 'Browser session';
-    const detail = document.createElement('span');
-    const lastSeen = session.lastSeenAt ? new Date(session.lastSeenAt).toLocaleString() : 'Unknown activity';
-    detail.textContent = `${lastSeen}${session.userAgent ? ` · ${session.userAgent}` : ''}`;
-    copy.append(title, detail);
-    row.append(copy);
-    if (!session.current) {
-      const revoke = document.createElement('button');
-      revoke.type = 'button';
-      revoke.textContent = 'Revoke';
-      revoke.dataset.accountSessionId = session.sessionId;
-      row.append(revoke);
-    }
-    list.append(row);
-  }
-  if (!list.children.length) {
-    const empty = document.createElement('p');
-    empty.className = 'setting-value';
-    empty.textContent = state.account.authenticated ? 'No active sessions.' : 'Log in to manage sessions.';
-    list.append(empty);
-  }
-}
-
-async function revokeAccountSession(sessionId) {
-  try {
-    await accountRequest(`/account/api/sessions/${encodeURIComponent(sessionId)}/revoke`, { method: 'POST' });
-    setAccountSecurityStatus('Session revoked.', 'good');
-    await refreshAccountSessions(false);
-  } catch (err) {
-    setAccountSecurityStatus(accountErrorMessage(err, 'login'), 'bad');
-  }
-}
-
-async function revokeOtherAccountSessions() {
-  if (!state.account.authenticated || !window.confirm('Log out every other browser session?')) return;
-  try {
-    const result = await accountRequest('/account/api/sessions/revoke-others', { method: 'POST' });
-    setAccountSecurityStatus(`${result.count} other session${result.count === 1 ? '' : 's'} logged out.`, 'good');
-    await refreshAccountSessions(false);
-  } catch (err) {
-    setAccountSecurityStatus(accountErrorMessage(err, 'login'), 'bad');
-  }
-}
-
-async function changeAccountPassword(event) {
-  event.preventDefault();
-  const currentPassword = $('settings-account-current-password').value;
-  const newPassword = $('settings-account-new-password').value;
-  const confirmation = $('settings-account-confirm-password').value;
-  if (newPassword.length < 10) return setAccountSecurityStatus('New password must be at least 10 characters.', 'bad');
-  if (newPassword !== confirmation) return setAccountSecurityStatus('The new passwords do not match.', 'bad');
-  try {
-    const result = await accountRequest('/account/api/password/change', {
-      method: 'POST',
-      body: { currentPassword, newPassword },
-    });
-    $('settings-account-password-form').reset();
-    setAccountSecurityStatus(`Password changed. ${result.revokedSessions || 0} other session${result.revokedSessions === 1 ? '' : 's'} logged out.`, 'good');
-    await refreshAccountSessions(false);
-  } catch (err) {
-    setAccountSecurityStatus(accountErrorMessage(err, 'login'), 'bad');
-  }
-}
-
-function setAccountSecurityStatus(message, tone = '') {
-  const output = $('settings-account-security-status');
-  output.textContent = message || '';
-  output.className = `auth-status${tone ? ` ${tone}` : ''}`;
-}
-
-function readAccountForm(includeDisplayName) {
-  const userId = $('auth-account-user').value.trim().toLowerCase();
-  const displayName = $('auth-account-name').value.trim() || userId;
-  const password = $('auth-account-password').value;
-  if (!/^[a-z0-9._-]{2,48}$/.test(userId)) {
-    setAuthStatus('Use a 2-48 character username: letters, numbers, dot, underscore, or dash.', 'bad');
-    return null;
-  }
-  if (!password) {
-    setAuthStatus('Enter your password.', 'bad');
-    return null;
-  }
-  if (includeDisplayName && password.length < 10) {
-    setAuthStatus('Password must be at least 10 characters.', 'bad');
-    return null;
-  }
-  const body = { userId, password };
-  if (includeDisplayName) {
-    body.displayName = displayName;
-    if (state.account.registrationRequiresInvite) {
-      const inviteCode = $('auth-account-invite').value.trim().toUpperCase();
-      if (!inviteCode) {
-        setAuthStatus('Enter the invitation code provided by the relay administrator.', 'bad');
-        return null;
-      }
-      body.inviteCode = inviteCode;
-    }
-  }
-  return body;
-}
-
-function applyAccountUser(user) {
-  state.account.authenticated = true;
-  state.account.userId = user?.userId || '';
-  state.account.userName = user?.userName || user?.userId || '';
-  saveAccountSettings(state.account);
-  updateSettingsView();
-}
-
-function showAgentToken(token) {
-  const text = `Agent token shown once:\n${token}\n\nPut it in config.json as remoteRelayToken, then restart VoxHF on the Altitude PC.`;
-  for (const id of ['settings-account-token', 'auth-agent-token']) {
-    const box = $(id);
-    if (!box) continue;
-    box.textContent = text;
-    box.classList.remove('hidden');
-  }
-  $('auth-continue')?.classList.remove('hidden');
-}
-
-function hideAgentToken() {
-  for (const id of ['settings-account-token', 'auth-agent-token']) {
-    const box = $(id);
-    if (!box) continue;
-    box.textContent = '';
-    box.classList.add('hidden');
-  }
-  $('auth-continue')?.classList.add('hidden');
-}
-
 const storedXpdrState = loadStoredXpdrState();
 const remoteConfig = readRemoteConfig();
 const remoteBrowserId = loadRemoteBrowserId();
-const storedAccount = loadAccountSettings();
+const storedAccount = window.VoxHFAccount.loadStoredAccount(localStorage);
 
 // All page state lives here so reconnects and UI rendering can stay
 // predictable. The proxy remains the source of truth for network status.
@@ -869,11 +532,8 @@ const state = {
   remoteIdentity: { userId: '', userName: '' },
   account: {
     authenticated: false,
-    statusKnown: false,
     userId: storedAccount.userId,
     userName: storedAccount.userName,
-    registrationEnabled: null,
-    registrationRequiresInvite: true,
     sessions: [],
   },
   authOverlayDismissed: loadAuthManualPreference(),
@@ -912,8 +572,17 @@ const state = {
     subscribed: false,
     busy: false,
     syncing: false,
+    notifyIvaoConnected: loadNotificationOnlinePreference(),
+    notifyAgentOffline: loadNotificationAgentOfflinePreference(),
     status: 'Waiting for proxy',
     lastSyncSignature: '',
+  },
+  unicomTimer: {
+    active: false,
+    startedAt: '',
+    expiresAt: '',
+    pending: false,
+    pendingTimer: null,
   },
   weatherExpanded: new Set(),
   weatherPending: new Map(),
@@ -948,15 +617,34 @@ const state = {
   squawk: storedXpdrState.squawk,
   xpdrMode: storedXpdrState.mode,
   identTimer: null,
+  controlsDisabled: true,
 };
 
 // Tiny DOM/string helpers kept local to avoid a frontend build step.
 const $ = id => document.getElementById(id);
 const enc = text => String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+const accountController = window.VoxHFAccount.createAccountController({
+  state,
+  storage: localStorage,
+  document,
+  location,
+  fetchImpl: (...args) => fetch(...args),
+  getElement: $,
+  getRelay: remoteRelayDraft,
+  getAccountLabel: remoteUserLabel,
+  updateWorkspace: updateSettingsView,
+  setRemoteCheck,
+  addLocal,
+  addErrorMessage,
+  saveManualPreference: saveAuthManualPreference,
+  connect,
+  closeSettings,
+});
+
 // UI ids are grouped so global state changes, such as disconnect or TX
 // active, can be applied consistently.
-const CONTROL_IDS = ['send', 'com1-input', 'com2-input', 'com1-select', 'com2-select', 'tx1', 'tx2', 'settings-test-audio', 'settings-monitor-tx', 'xpdr-code', 'xpdr-stby', 'xpdr-alt', 'xpdr-ident'];
+const CONTROL_IDS = ['send', 'com1-input', 'com2-input', 'com1-select', 'com2-select', 'tx1', 'tx2', 'unicom-timer-toggle', 'settings-test-audio', 'settings-monitor-tx', 'xpdr-code', 'xpdr-stby', 'xpdr-alt', 'xpdr-ident'];
 const TX_BUTTON_IDS = ['tx1', 'tx2'];
 
 // Binary microphone frames are prefixed with CTX1 so the proxy can
@@ -1040,8 +728,8 @@ function connectLocal(force = false) {
 }
 
 function connectRemote(force = false) {
-  if (shouldShowAuthGate()) {
-    showAuthGate();
+  if (accountController.shouldShowGate()) {
+    accountController.showGate();
     return;
   }
   if (!state.remote.url && state.remote.relay) {
@@ -1095,8 +783,8 @@ function connectRemote(force = false) {
 }
 
 function showRemoteSetupPrompt() {
-  if (shouldShowAuthGate()) {
-    showAuthGate();
+  if (accountController.shouldShowGate()) {
+    accountController.showGate();
     return;
   }
   if (state.account.authenticated) {
@@ -1123,111 +811,11 @@ function showRemoteSettingsAction() {
   $('overlay-actions').classList.remove('hidden');
 }
 
-function shouldShowAuthGate() {
-  // In hosted mode the normal path is account login. Manual token setup is
-  // still available, but it is intentionally a secondary escape hatch.
-  return state.remote.enabled
-    && !state.account.authenticated
-    && !state.remote.token
-    && !state.authOverlayDismissed;
-}
-
-function shouldUseAccountPage() {
-  // HTTPS deployments use clean account routes. The local proxy stays on its
-  // direct workspace root and never introduces an account navigation step.
-  return state.account.statusKnown
-    && state.remote.enabled
-    && location.protocol === 'https:';
-}
-
-function openAccountPage() {
-  const next = `${location.pathname}${location.search}${location.hash}`;
-  const loginPage = location.protocol === 'https:' ? '/login' : 'login.html';
-  location.replace(`${loginPage}?next=${encodeURIComponent(next)}`);
-}
-
-function syncAuthInputs(force = false) {
-  const fields = [
-    ['auth-remote-url', state.remote.relay || defaultRemoteRelay()],
-    ['auth-account-user', state.account.userId || ''],
-    ['auth-account-name', state.account.userName || ''],
-  ];
-  for (const [id, value] of fields) {
-    const input = $(id);
-    if (!input) continue;
-    if (force || !input.value) input.value = value;
-  }
-}
-
-function setAuthStatus(text, tone = '') {
-  const status = $('auth-status');
-  if (!status) return;
-  status.textContent = text;
-  status.classList.remove('good', 'bad');
-  if (tone) status.classList.add(tone);
-}
-
-function defaultAuthStatusText() {
-  if (!state.remote.relay) return 'Enter the relay URL, then log in or register.';
-  if (state.account.registrationEnabled === false) {
-    return 'Log in with an existing account. Registration is disabled on this relay.';
-  }
-  return 'Log in on each browser. Register once, then copy the agent token to the Altitude PC.';
-}
-
-function updateAuthControls() {
-  const register = $('auth-register');
-  if (!register) return;
-  const disabled = state.account.registrationEnabled === false;
-  register.disabled = disabled;
-  register.title = disabled ? 'Registration is disabled on this relay.' : '';
-}
-
-function showAuthGate(message = '') {
-  if (shouldUseAccountPage()) {
-    openAccountPage();
-    return;
-  }
-  syncAuthInputs(false);
-  if (message) setAuthStatus(message);
-  else setAuthStatus(defaultAuthStatusText());
-  updateAuthControls();
-  $('overlay').classList.add('hidden');
-  $('auth-overlay').classList.remove('hidden');
-}
-
-function hideAuthGate() {
-  $('auth-overlay').classList.add('hidden');
-}
-
-function updateAuthGate() {
-  if (shouldShowAuthGate()) showAuthGate();
-  else hideAuthGate();
-}
-
 function openManualRemoteSetup() {
   state.authOverlayDismissed = true;
   saveAuthManualPreference(true);
-  hideAuthGate();
+  accountController.hideGate();
   openSettings('remote');
-}
-
-function openAccountLogin() {
-  if (state.remote.enabled && location.protocol === 'https:') {
-    openAccountPage();
-    return;
-  }
-  state.authOverlayDismissed = false;
-  saveAuthManualPreference(false);
-  closeSettings();
-  showAuthGate('Sign in or register a hosted relay account.');
-}
-
-function continueAfterAuth() {
-  state.authOverlayDismissed = true;
-  saveAuthManualPreference(false);
-  hideAuthGate();
-  connect(true);
 }
 
 function remoteCloseReason(event) {
@@ -1287,6 +875,14 @@ function sendRemoteAction(action) {
     });
   }
 
+  if (action.action === 'unicom_timer_start') {
+    return sendRemoteMessage(REMOTE_MESSAGE_TYPES.UNICOM_TIMER_START);
+  }
+
+  if (action.action === 'unicom_timer_cancel') {
+    return sendRemoteMessage(REMOTE_MESSAGE_TYPES.UNICOM_TIMER_CANCEL);
+  }
+
   if (action.action === 'sim_com1' || action.action === 'sim_com2') {
     return sendRemoteMessage(REMOTE_MESSAGE_TYPES.RADIO_SET, {
       com: action.action === 'sim_com2' ? 2 : 1,
@@ -1339,7 +935,7 @@ function sendRemoteAction(action) {
   }
 
   if (action.action === 'test_audio') {
-    addLocal('Test RX is local-only in this remote preview.');
+    addLocal('Test RX is local-only in Remote mode.');
     return false;
   }
 
@@ -1456,6 +1052,7 @@ function handleMessage(data) {
       setFlightPlanStatus(data.flightPlanStatus || 'missing', data.flightPlan, data.weatherState);
       if (data.remotePairing) applyLocalRemotePairing(data.remotePairing, false);
       if (data.notifications) applyNotificationState(data.notifications);
+      applyUnicomTimerState(data.unicomTimer);
       if (data.callsign) state.callsign = data.callsign;
       if (Array.isArray(data.log)) data.log.forEach(addMessage);
       if (data.connected) setOnline(data.callsign);
@@ -1509,6 +1106,12 @@ function handleMessage(data) {
       break;
     case 'notification_state':
       applyNotificationState(data);
+      break;
+    case 'unicom_timer_state':
+      applyUnicomTimerState(data);
+      break;
+    case 'unicom_timer_expired':
+      handleUnicomTimerExpired(data);
       break;
     case 'voice':
       pulseRx();
@@ -1588,6 +1191,14 @@ function handleRemoteRelayMessage(data) {
     case REMOTE_MESSAGE_TYPES.NOTIFICATION_STATE:
       markRemoteUpdate();
       applyNotificationState(data.payload || {});
+      return;
+    case REMOTE_MESSAGE_TYPES.UNICOM_TIMER_STATE:
+      markRemoteUpdate();
+      applyUnicomTimerState(data.payload || {});
+      return;
+    case REMOTE_MESSAGE_TYPES.UNICOM_TIMER_EXPIRED:
+      markRemoteUpdate();
+      handleUnicomTimerExpired(data.payload || {});
       return;
     case REMOTE_MESSAGE_TYPES.RELAY_ERROR:
       setRemoteCheck(data.payload?.message || 'Remote relay error.');
@@ -1844,6 +1455,7 @@ function setOffline(title, text) {
 function setControlsDisabled(disabled) {
   // Disable only actions that require a live proxy/Altitude session. The
   // rest of the UI, including visible messages, remains inspectable.
+  state.controlsDisabled = Boolean(disabled);
   CONTROL_IDS.forEach(id => {
     if (id === 'settings-test-audio') {
       $(id).disabled = false;
@@ -1852,6 +1464,71 @@ function setControlsDisabled(disabled) {
     const remoteUnsupportedControl = state.remote.enabled && id === 'settings-monitor-tx';
     $(id).disabled = disabled || remoteUnsupportedControl;
   });
+  renderUnicomTimer();
+}
+
+function applyUnicomTimerState(payload = {}) {
+  clearTimeout(state.unicomTimer.pendingTimer);
+  const startedAt = String(payload.startedAt || '');
+  const expiresAt = String(payload.expiresAt || '');
+  const active = payload.active === true
+    && Number.isFinite(Date.parse(startedAt))
+    && Number.isFinite(Date.parse(expiresAt));
+  state.unicomTimer = {
+    active,
+    startedAt: active ? startedAt : '',
+    expiresAt: active ? expiresAt : '',
+    pending: false,
+    pendingTimer: null,
+  };
+  renderUnicomTimer();
+}
+
+function handleUnicomTimerExpired(payload = {}) {
+  applyUnicomTimerState({ active: false });
+  const expiredAt = Date.parse(String(payload.expiredAt || ''));
+  const suffix = Number.isFinite(expiredAt)
+    ? ` at ${new Date(expiredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    : '';
+  addTransientLocal(`UNICOM three-minute timer expired${suffix}.`, 15000, 1000);
+}
+
+function toggleUnicomTimer() {
+  if (state.unicomTimer.pending) return;
+  const action = state.unicomTimer.active ? 'unicom_timer_cancel' : 'unicom_timer_start';
+  if (!send({ action })) {
+    addErrorMessage('The local agent is not available for the UNICOM timer.');
+    return;
+  }
+  state.unicomTimer.pending = true;
+  state.unicomTimer.pendingTimer = setTimeout(() => {
+    state.unicomTimer.pending = false;
+    state.unicomTimer.pendingTimer = null;
+    renderUnicomTimer();
+  }, 3000);
+  renderUnicomTimer();
+}
+
+function renderUnicomTimer() {
+  const button = $('unicom-timer-toggle');
+  const display = $('unicom-timer-display');
+  if (!button || !display) return;
+  const remainingSeconds = state.unicomTimer.active
+    ? Math.max(0, Math.ceil((Date.parse(state.unicomTimer.expiresAt) - Date.now()) / 1000))
+    : 180;
+  const time = formatTimerDuration(remainingSeconds);
+  display.textContent = state.unicomTimer.active ? `Cancel ${time}` : 'Start 3:00';
+  button.classList.toggle('active', state.unicomTimer.active);
+  button.setAttribute('aria-pressed', state.unicomTimer.active ? 'true' : 'false');
+  button.setAttribute('aria-label', state.unicomTimer.active
+    ? `Cancel UNICOM timer with ${time} remaining`
+    : 'Start three-minute UNICOM timer');
+  button.disabled = state.controlsDisabled || state.unicomTimer.pending;
+}
+
+function formatTimerDuration(totalSeconds) {
+  const seconds = Math.max(0, Math.round(Number(totalSeconds) || 0));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
 function setFlightPlanStatus(status, flightPlan = null, weatherState = null) {
@@ -1968,12 +1645,15 @@ function openSettings(tab = state.activeSettingsTab) {
     document.body.classList.add('settings-open');
     modal.classList.remove('hidden');
   }
-  if (state.activeSettingsTab === 'remote') refreshAccountStatus();
+  if (state.activeSettingsTab === 'remote') accountController.refreshStatus();
 }
 
 function closeSettings() {
   const modal = $('settings-modal');
   if (modal.classList.contains('hidden')) return;
+  if (!$('notification-agent-offline-confirm').classList.contains('hidden')) {
+    closeNotificationAgentOfflineConfirm(false, false);
+  }
   modal.classList.add('hidden');
   document.body.classList.remove('settings-open');
   document.body.style.removeProperty('top');
@@ -2157,7 +1837,6 @@ function updateSettingsView() {
   setText('settings-remote-mode', state.remote.enabled ? 'Remote' : 'Local');
   setText('settings-remote-relay', displayRemoteRelay());
   setText('settings-remote-user', state.remote.enabled ? remoteUserLabel() : '---');
-  setText('settings-account-state', state.account.authenticated ? `Logged in as ${remoteUserLabel()}` : 'Not logged in');
   setText('settings-remote-summary', summary.text);
   setSettingTone('settings-remote-summary', summary.tone);
   setText('settings-remote-check', state.remoteCheck.detail ? `${state.remoteCheck.status}: ${state.remoteCheck.detail}` : state.remoteCheck.status);
@@ -2167,15 +1846,7 @@ function updateSettingsView() {
   setText('settings-remote-devices', String(state.remoteDevices.size));
   setText('settings-remote-agent', remoteAgentStatusText());
   setText('settings-remote-last-update', remoteLastUpdateText());
-
-  $('settings-account-open').disabled = state.account.authenticated;
-  $('settings-account-logout').disabled = !state.account.authenticated;
-  $('settings-account-rotate-token').disabled = !state.account.authenticated;
-  $('settings-account-security').classList.toggle('hidden', !state.account.authenticated);
-  renderAccountSessions();
-  $('settings-remote-pair').disabled = state.account.authenticated;
-  updateAuthControls();
-  syncAuthInputs(false);
+  accountController.renderSettings();
 
   const renewButton = $('settings-remote-renew-code');
   renewButton.disabled = state.remote.enabled;
@@ -2184,6 +1855,7 @@ function updateSettingsView() {
     ? 'Pairing codes are generated by the local VoxHF webapp on the Altitude PC.'
     : 'Ask the connected local agent for a fresh short-lived browser pairing code.';
   updateNotificationSettings();
+  updateRxActivationPrompt();
 }
 
 function pushNotificationsSupported() {
@@ -2197,12 +1869,27 @@ function notificationPermission() {
   return 'Notification' in window ? Notification.permission : 'unsupported';
 }
 
+function isIosDevice() {
+  // iPadOS can expose a desktop-style MacIntel platform, so touch capability
+  // is needed in addition to the normal iPhone/iPad user-agent identifiers.
+  const platform = navigator.userAgentData?.platform || navigator.platform || '';
+  const userAgent = navigator.userAgent || '';
+  return /iPad|iPhone|iPod|iOS/i.test(`${platform} ${userAgent}`)
+    || (platform === 'MacIntel' && Number(navigator.maxTouchPoints) > 1);
+}
+
+function updateRxActivationPrompt() {
+  const prompt = $('rx-activation-prompt');
+  if (!prompt) return;
+  const needsGesture = isIosDevice() && state.audioCtx?.state !== 'running';
+  prompt.classList.toggle('hidden', !needsGesture);
+}
+
 function updateNotificationSettings() {
   const supported = pushNotificationsSupported();
   const permission = notificationPermission();
   const notifications = state.notifications;
-  const appleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const appleMobile = isIosDevice();
   const standalone = window.matchMedia?.('(display-mode: standalone)').matches
     || navigator.standalone === true;
   const supportText = !supported
@@ -2229,6 +1916,8 @@ function updateNotificationSettings() {
 
   const enable = $('settings-notifications-enable');
   const disable = $('settings-notifications-disable');
+  const onlineAlert = $('settings-notifications-online');
+  const agentOfflineAlert = $('settings-notifications-agent-offline');
   if (enable) {
     enable.disabled = notifications.busy
       || !deviceEligible
@@ -2237,6 +1926,20 @@ function updateNotificationSettings() {
       || notifications.subscribed;
   }
   if (disable) disable.disabled = notifications.busy || !supported || !notifications.subscribed;
+  if (onlineAlert) {
+    onlineAlert.checked = notifications.notifyIvaoConnected === true;
+    onlineAlert.disabled = notifications.busy || !notifications.available || !notifications.subscribed;
+  }
+  if (agentOfflineAlert) {
+    agentOfflineAlert.checked = notifications.notifyAgentOffline === true;
+    agentOfflineAlert.disabled = notifications.busy
+      || !notifications.available
+      || !notifications.subscribed
+      || !state.remote.enabled;
+    agentOfflineAlert.title = state.remote.enabled
+      ? 'Notify this device if the local VoxHF proxy becomes unreachable during an active IVAO session.'
+      : 'PC / proxy offline alerts require remote relay mode.';
+  }
 }
 
 function applyNotificationState(payload) {
@@ -2302,12 +2005,7 @@ async function syncExistingNotificationSubscription() {
       return;
     }
     const payload = notificationSubscriptionPayload(subscription);
-    const signature = [
-      payload.endpoint,
-      state.notifications.vapidPublicKey,
-      state.remote.enabled ? state.remoteSelectedDeviceId : 'local',
-      state.generation,
-    ].join('|');
+    const signature = notificationSubscriptionSignature(payload);
     if (state.notifications.lastSyncSignature === signature) return;
     if (send({ action: 'notification_subscribe', subscription: payload })) {
       state.notifications.lastSyncSignature = signature;
@@ -2349,12 +2047,7 @@ async function enableNotifications() {
       throw new Error('The proxy is offline. Reconnect it and try again.');
     }
     state.notifications.subscribed = true;
-    state.notifications.lastSyncSignature = [
-      payload.endpoint,
-      state.notifications.vapidPublicKey,
-      state.remote.enabled ? state.remoteSelectedDeviceId : 'local',
-      state.generation,
-    ].join('|');
+    state.notifications.lastSyncSignature = notificationSubscriptionSignature(payload);
     state.notifications.status = 'Notifications enabled on this device.';
   } catch (err) {
     state.notifications.status = err.message || 'Could not enable notifications.';
@@ -2374,6 +2067,9 @@ async function disableNotifications() {
     const subscription = await registration.pushManager.getSubscription();
     if (!subscription) {
       state.notifications.subscribed = false;
+      state.notifications.notifyAgentOffline = false;
+      saveNotificationAgentOfflinePreference(false);
+      state.notifications.lastSyncSignature = '';
       state.notifications.status = 'Notifications are already disabled on this device.';
       return;
     }
@@ -2382,6 +2078,8 @@ async function disableNotifications() {
     }
     await subscription.unsubscribe();
     state.notifications.subscribed = false;
+    state.notifications.notifyAgentOffline = false;
+    saveNotificationAgentOfflinePreference(false);
     state.notifications.lastSyncSignature = '';
     state.notifications.status = 'Notifications disabled on this device.';
   } catch (err) {
@@ -2404,7 +2102,97 @@ function notificationSubscriptionPayload(subscription) {
     deviceId: state.remoteBrowserId,
     deviceName: notificationDeviceName(),
     appUrl: appUrl.toString(),
+    notifyIvaoConnected: state.notifications.notifyIvaoConnected === true,
+    notifyAgentOffline: state.notifications.notifyAgentOffline === true && state.remote.enabled,
   };
+}
+
+function notificationSubscriptionSignature(payload) {
+  return [
+    payload.endpoint,
+    state.notifications.vapidPublicKey,
+    state.remote.enabled ? state.remoteSelectedDeviceId : 'local',
+    state.generation,
+    payload.notifyIvaoConnected ? 'online-alert' : 'no-online-alert',
+    payload.notifyAgentOffline ? 'agent-offline-alert' : 'no-agent-offline-alert',
+  ].join('|');
+}
+
+function setNotificationOnlinePreference(event) {
+  const enabled = event.currentTarget.checked === true;
+  state.notifications.notifyIvaoConnected = enabled;
+  state.notifications.lastSyncSignature = '';
+  state.notifications.status = enabled
+    ? 'IVAO online confirmation enabled on this device.'
+    : 'IVAO online confirmation disabled on this device.';
+  saveNotificationOnlinePreference(enabled);
+  updateNotificationSettings();
+  syncExistingNotificationSubscription().catch((err) => {
+    state.notifications.status = err.message || 'Could not save the online notification preference.';
+    updateNotificationSettings();
+  });
+}
+
+let notificationAgentOfflineConfirmResolve = null;
+let notificationAgentOfflineConfirmReturnFocus = null;
+
+function confirmNotificationAgentOffline(returnFocus) {
+  // Temporarily make the Settings panel inert so assistive technology and
+  // keyboard focus remain inside the nested privacy confirmation.
+  const modal = $('notification-agent-offline-confirm');
+  const settingsModal = $('settings-modal');
+  const settingsPanel = settingsModal.querySelector('.settings-panel');
+
+  return new Promise(resolve => {
+    notificationAgentOfflineConfirmResolve = resolve;
+    notificationAgentOfflineConfirmReturnFocus = returnFocus || document.activeElement;
+    settingsModal.setAttribute('aria-hidden', 'true');
+    if (settingsPanel) settingsPanel.inert = true;
+    modal.classList.remove('hidden');
+    $('notification-agent-offline-confirm-enable').focus();
+  });
+}
+
+function closeNotificationAgentOfflineConfirm(confirmed = false, restoreFocus = true) {
+  const modal = $('notification-agent-offline-confirm');
+  if (modal.classList.contains('hidden')) return;
+
+  modal.classList.add('hidden');
+  const settingsModal = $('settings-modal');
+  const settingsPanel = settingsModal.querySelector('.settings-panel');
+  settingsModal.removeAttribute('aria-hidden');
+  if (settingsPanel) settingsPanel.inert = false;
+
+  const resolve = notificationAgentOfflineConfirmResolve;
+  const returnFocus = notificationAgentOfflineConfirmReturnFocus;
+  notificationAgentOfflineConfirmResolve = null;
+  notificationAgentOfflineConfirmReturnFocus = null;
+  if (restoreFocus && returnFocus?.focus) returnFocus.focus();
+  if (resolve) resolve(confirmed === true);
+}
+
+async function setNotificationAgentOfflinePreference(event) {
+  const checkbox = event.currentTarget;
+  const enabled = checkbox.checked === true;
+  if (enabled) {
+    const confirmed = await confirmNotificationAgentOffline(checkbox);
+    if (!confirmed) {
+      checkbox.checked = false;
+      return;
+    }
+  }
+
+  state.notifications.notifyAgentOffline = enabled;
+  state.notifications.lastSyncSignature = '';
+  state.notifications.status = enabled
+    ? 'PC / proxy offline alerts enabled on this device.'
+    : 'PC / proxy offline alerts disabled on this device.';
+  saveNotificationAgentOfflinePreference(enabled);
+  updateNotificationSettings();
+  syncExistingNotificationSubscription().catch((err) => {
+    state.notifications.status = err.message || 'Could not save the offline alert preference.';
+    updateNotificationSettings();
+  });
 }
 
 function notificationDeviceName() {
@@ -2430,11 +2218,21 @@ function urlBase64ToUint8Array(value) {
 
 // RX audio: the proxy decodes Speex into mono 16-bit PCM and this queues it.
 async function ensureAudio() {
-  // AudioContext creation is delayed until user interaction or first PCM
-  // because browsers restrict autoplay-like audio startup.
-  if (!state.audioCtx) state.audioCtx = new AudioContext({ sampleRate: RX_PCM_SAMPLE_RATE });
-  if (state.audioCtx.state === 'suspended') await state.audioCtx.resume();
-  updateSettingsView();
+  // Create one RX output and resume it whenever the current browser lifecycle
+  // permits. A newly loaded iOS/iPadOS page still needs a trusted gesture;
+  // the visible radio prompt and the page-wide gesture listener provide it.
+  if (!state.audioCtx || state.audioCtx.state === 'closed') {
+    state.audioCtx = new AudioContext({ sampleRate: RX_PCM_SAMPLE_RATE });
+    state.audioCtx.addEventListener?.('statechange', updateRxActivationPrompt);
+  }
+  try {
+    // Safari can report `interrupted` as well as the standard `suspended`
+    // state. Both need the same resume attempt; the persistent gesture
+    // listener can retry invisibly if WebKit refuses it outside a user event.
+    if (state.audioCtx.state !== 'running') await state.audioCtx.resume();
+  } finally {
+    updateSettingsView();
+  }
   return state.audioCtx;
 }
 
@@ -2447,9 +2245,12 @@ function resetAudioSchedule() {
 
 async function resumeAudioIfNeeded() {
   // Browser tabs may suspend audio independently from WebSocket state.
-  if (state.audioCtx && state.audioCtx.state === 'suspended') {
+  if (!state.audioCtx || state.audioCtx.state === 'running') return;
+  if (state.audioCtx.state === 'closed') state.audioCtx = null;
+  else {
     try { await state.audioCtx.resume(); } catch (_) {}
   }
+  updateSettingsView();
 }
 
 async function handleIncomingPcm(buffer) {
@@ -2499,7 +2300,7 @@ async function playPcm(buffer) {
 }
 
 async function playBrowserTestTone() {
-  // This is local to the browser. In Remote Preview it doubles as the user
+  // This is local to the browser. In Remote mode it doubles as the user
   // gesture that unlocks mobile audio before live RX PCM arrives.
   const ctx = await ensureAudio();
   const samples = Math.floor(RX_PCM_SAMPLE_RATE * 0.45);
@@ -2987,7 +2788,10 @@ function handleComposerKeydown(event) {
     return;
   }
 
-  if (event.key === 'Enter') submitMessage();
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    submitMessage();
+  }
 }
 
 // Local chat and commands. METAR/TAF use the FSD form accepted by Altitude.
@@ -3706,7 +3510,10 @@ function bindUi() {
   // back to the same model functions used by commands.
   bindAudioUnlock();
   $('theme-toggle').onclick = toggleTheme;
-  $('send').onclick = submitMessage;
+  $('message-form').addEventListener('submit', event => {
+    event.preventDefault();
+    submitMessage();
+  });
   $('settings-open').onclick = () => openSettings();
   $('update-dismiss').onclick = dismissUpdateNotice;
   $('overlay-remote-settings').onclick = () => openSettings('remote');
@@ -3714,7 +3521,35 @@ function bindUi() {
   $('settings-modal').addEventListener('mousedown', event => {
     if (event.target === $('settings-modal')) closeSettings();
   });
+  $('notification-agent-offline-confirm-cancel').onclick = () => closeNotificationAgentOfflineConfirm(false);
+  $('notification-agent-offline-confirm-enable').onclick = () => closeNotificationAgentOfflineConfirm(true);
+  $('notification-agent-offline-confirm').addEventListener('mousedown', event => {
+    if (event.target === $('notification-agent-offline-confirm')) closeNotificationAgentOfflineConfirm(false);
+  });
   document.addEventListener('keydown', event => {
+    const confirmation = $('notification-agent-offline-confirm');
+    if (!confirmation.classList.contains('hidden')) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeNotificationAgentOfflineConfirm(false);
+        return;
+      }
+      if (event.key === 'Tab') {
+        const first = $('notification-agent-offline-confirm-cancel');
+        const last = $('notification-agent-offline-confirm-enable');
+        if (!confirmation.contains(document.activeElement)) {
+          event.preventDefault();
+          first.focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+      return;
+    }
     if (event.key === 'Escape' && !$('settings-modal').classList.contains('hidden')) closeSettings();
   });
   document.querySelector('.settings-tabs').onclick = event => {
@@ -3774,8 +3609,12 @@ function bindUi() {
     await ensureAudio();
     send({ action: 'test_audio' });
   };
+  $('rx-activation-prompt').onclick = () => ensureAudio().catch(() => {});
   $('settings-notifications-enable').onclick = enableNotifications;
   $('settings-notifications-disable').onclick = disableNotifications;
+  $('settings-notifications-online').onchange = setNotificationOnlinePreference;
+  $('settings-notifications-agent-offline').onchange = setNotificationAgentOfflinePreference;
+  $('unicom-timer-toggle').onclick = toggleUnicomTimer;
   $('settings-remote-apply').onclick = applyRemoteSettings;
   $('settings-remote-check-button').onclick = runRemotePreflight;
   $('settings-remote-renew-code').onclick = renewRemotePairingCode;
@@ -3783,23 +3622,8 @@ function bindUi() {
   $('settings-remote-pair').onclick = () => confirmRemotePairing();
   $('settings-remote-forget').onclick = forgetRemotePairing;
   $('settings-remote-local').onclick = switchToLocalMode;
-  $('settings-account-open').onclick = openAccountLogin;
-  $('settings-account-logout').onclick = logoutAccount;
-  $('settings-account-rotate-token').onclick = rotateAccountAgentToken;
-  $('settings-account-refresh-sessions').onclick = () => refreshAccountSessions(true);
-  $('settings-account-revoke-others').onclick = revokeOtherAccountSessions;
-  $('settings-account-sessions').onclick = event => {
-    const button = event.target.closest('[data-account-session-id]');
-    if (button) revokeAccountSession(button.dataset.accountSessionId);
-  };
-  $('settings-account-password-form').onsubmit = changeAccountPassword;
-  $('auth-login').onclick = loginAccount;
-  $('auth-register').onclick = registerAccount;
+  accountController.bindUi();
   $('auth-manual').onclick = openManualRemoteSetup;
-  $('auth-continue').onclick = continueAfterAuth;
-  $('auth-account-password').addEventListener('keydown', event => {
-    if (event.key === 'Enter') loginAccount();
-  });
   document.querySelector('.tabs').onclick = event => {
     const target = event.target.closest ? event.target : event.target.parentElement;
     if (!target) return;
@@ -3818,30 +3642,30 @@ function bindUi() {
 function bindAudioUnlock() {
   if (state.audioUnlockBound) return;
   state.audioUnlockBound = true;
-  const gestureEvent = window.PointerEvent ? 'pointerdown' : 'touchstart';
+  // Keep touchstart as a fallback even when WebKit exposes PointerEvent. Some
+  // iOS/iPadOS page restorations have produced only the touch or click event.
+  const gestureEvents = window.PointerEvent
+    ? ['pointerdown', 'touchstart', 'click']
+    : ['touchstart', 'click'];
   let unlockPending = false;
 
-  const removeUnlockListeners = () => {
-    document.removeEventListener(gestureEvent, unlock);
-    document.removeEventListener('keydown', unlock);
-  };
-
   const unlock = async () => {
-    // Mobile browsers require a user gesture before audio can play. Stop
-    // listening after the first successful resume so later iOS taps do not
-    // update Settings between pointerdown and click.
-    if (unlockPending) return;
+    // Keep this listener available for the lifetime of the page so WebKit can
+    // recover after suspending RX. While audio is running it is a no-op, which
+    // avoids changing Settings DOM between pointerdown and click.
+    if (unlockPending || state.audioCtx?.state === 'running') return;
     unlockPending = true;
     try {
-      const ctx = await ensureAudio();
-      if (ctx.state === 'running') removeUnlockListeners();
+      await ensureAudio();
     } catch (_) {
       // Keep the listeners installed so a later gesture can retry.
     } finally {
       unlockPending = false;
     }
   };
-  document.addEventListener(gestureEvent, unlock, { passive: true });
+  gestureEvents.forEach(eventName => {
+    document.addEventListener(eventName, unlock, { passive: true });
+  });
   document.addEventListener('keydown', unlock);
 }
 
@@ -3942,28 +3766,77 @@ async function resumeFromStandby() {
   else heartbeat();
 }
 
-// Standby/suspended tab: when the page becomes visible, check the control
-// channel and audio context without immediately discarding a working socket.
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) resumeFromStandby();
-});
-window.addEventListener('focus', resumeFromStandby);
-window.addEventListener('pageshow', resumeFromStandby);
-window.addEventListener('online', resumeFromStandby);
-setInterval(heartbeat, HEARTBEAT_MS);
+function initializeApp() {
+  // Standby/suspended tab: when the page becomes visible, check the control
+  // channel and audio context without immediately discarding a working socket.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) resumeFromStandby();
+  });
+  window.addEventListener('focus', resumeFromStandby);
+  window.addEventListener('pageshow', resumeFromStandby);
+  window.addEventListener('online', resumeFromStandby);
+  setInterval(heartbeat, HEARTBEAT_MS);
+  setInterval(renderUnicomTimer, 1000);
 
-applyTheme(activeTheme);
-bindUi();
-// Initial render keeps the app readable before the proxy connects.
-setControlsDisabled(true);
-updateComposerContext();
-renderSettingsTab();
-updateSettingsView();
-renderWeatherPanel();
-renderMessages();
-refreshNotificationSubscriptionState();
-checkForUpdates('release.json');
-refreshAccountStatus().finally(() => {
-  updateAuthGate();
-  connect();
-});
+  applyTheme(activeTheme);
+  bindUi();
+  // Initial render keeps the app readable before the proxy connects.
+  setControlsDisabled(true);
+  updateComposerContext();
+  renderSettingsTab();
+  updateSettingsView();
+  renderWeatherPanel();
+  renderMessages();
+  renderUnicomTimer();
+  refreshNotificationSubscriptionState();
+  checkForUpdates('release.json');
+  accountController.refreshStatus().finally(() => {
+    accountController.updateGate();
+    connect();
+  });
+}
+
+// Node regression tests execute this browser script inside a small fake DOM.
+// An explicit harness flag keeps production startup unconditional in every
+// normal browser while exposing only the stable behavior boundaries under test.
+if (globalThis.__VOXHF_FRONTEND_TEST__ === true) {
+  globalThis.__VOXHF_FRONTEND_TEST_HOOKS__ = {
+    state,
+    accountController,
+    REMOTE_MESSAGE_TYPES,
+    handleMessage,
+    handleRemoteRelayMessage,
+    selectRemoteDevice,
+    applyRemoteRadioState,
+    applyRemoteWeatherState,
+    addRemoteChatMessage,
+    applyUnicomTimerState,
+    handleUnicomTimerExpired,
+    toggleUnicomTimer,
+    renderUnicomTimer,
+    formatTimerDuration,
+    setFlightPlanStatus,
+    openSettings,
+    closeSettings,
+    loadNotificationOnlinePreference,
+    saveNotificationOnlinePreference,
+    loadNotificationAgentOfflinePreference,
+    saveNotificationAgentOfflinePreference,
+    notificationSubscriptionPayload,
+    notificationSubscriptionSignature,
+    setComLabel,
+    applyXpdrState,
+    renderWeatherPanel,
+    bindAudioUnlock,
+    isIosDevice,
+    updateRxActivationPrompt,
+    resumeAudioIfNeeded,
+    addMessage,
+    privatePeerForMessage,
+    setActiveChatFilter,
+    messageMatchesCurrentTab,
+    closePrivateChat,
+  };
+} else {
+  initializeApp();
+}

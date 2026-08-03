@@ -23,11 +23,13 @@ function createFsdProxy(options) {
   let ivaoSocket = null;
   let fsdCoreSocket = null;
   let activeSessionId = 0;
+  let confirmedIvaoSessionId = 0;
   const pendingWeatherRequests = new Map();
 
   const server = net.createServer((coreSocket) => {
     const sessionId = ++activeSessionId;
     fsdCoreSocket = coreSocket;
+    state.resetFlightTelemetry?.();
     state.setConnected(true);
 
     const host = options.getHost();
@@ -36,7 +38,9 @@ function createFsdProxy(options) {
     const remote = net.createConnection({ host, port }, () => {
       if (sessionId !== activeSessionId) return destroyIfOpen(remote);
       ivaoSocket = remote;
+      confirmedIvaoSessionId = sessionId;
       logger.log('[6809] Connected to IVAO');
+      options.onConnected?.();
     });
 
     const coreBuf = { text: '' };
@@ -139,11 +143,13 @@ function createFsdProxy(options) {
     // disconnected.
     if (sessionId !== activeSessionId) return;
 
+    const wasConnected = confirmedIvaoSessionId === sessionId;
     activeSessionId = 0;
+    confirmedIvaoSessionId = 0;
     fsdCoreSocket = null;
     ivaoSocket = null;
     state.setConnected(false);
-    options.onClose?.();
+    options.onClose?.({ wasConnected });
   }
 
   function sendChatCommand(cmd, reportError = () => {}) {

@@ -23,8 +23,10 @@ directly to IVAO, PilotCore, FSD, or TS2.
 - `apps/relay/` contains the authenticated remote relay, SQLite account/admin
   storage, and relay HTTP APIs.
 - `packages/protocol/` defines and validates the typed remote protocol.
-- `webapp/app.html`, `webapp/app.js`, `webapp/styles.css`, and
-  `webapp/weather.js` form the dependency-free operational frontend.
+- `webapp/app.html`, `webapp/app.js`, `webapp/account.js`,
+  `webapp/styles.css`, and `webapp/weather.js` form the dependency-free
+  operational frontend. `app.js` owns live flight state and composition;
+  `account.js` owns workspace account and browser-session behavior.
 - Other files in `webapp/` provide the public site, setup, authentication,
   administration, legal pages, and installable-webapp assets.
 - `infra/docker/` is the production Caddy and Docker Compose deployment.
@@ -39,14 +41,36 @@ entirely. Do not merge the local runtime back into a monolithic `proxy.js`.
   both relay and local-agent boundaries.
 - Stop TX on browser, relay, agent, pairing, or device disconnect.
 - Keep audio live-only. Do not record it or store it in SQLite.
+- Bind browser RX activation and recovery before account status or relay work.
+  A newly loaded iOS/iPadOS document requires one trusted user gesture: expose
+  that state through the radio activation prompt and let any normal page gesture
+  unlock it. Opening Settings or receiving the first PCM frame must not be the
+  only activation path. Keep the page-lifetime gesture retry and the
+  foreground/standby recovery for mobile browsers that later suspend,
+  interrupt, or close their audio context.
 - Keep chat history bounded and memory-only in the local agent. It survives
   browser refreshes during the current proxy session and is independent of
   notification permission.
-- Keep Web Push subscriptions and credentials local to the proxy. The relay
-  transports subscription commands but must not retain endpoints or send push
-  notifications.
-- Notifications are per device and cover incoming private messages plus public
-  messages beginning with the active callsign.
+- Keep Web Push subscriptions and VAPID credentials local to the proxy. The
+  relay normally only transports subscription commands. The sole exception is
+  the explicitly enabled agent-offline watchdog: the proxy may give the relay
+  short-lived, one-use Push requests that are already encrypted and signed.
+  Keep those tickets in memory only, send them unchanged, and never put their
+  endpoints or contents in SQLite, logs, audits, or backups. The relay must
+  never receive the local VAPID private key.
+- Notifications are per device and cover incoming private messages, public
+  messages beginning with the active callsign, and confirmed IVAO disconnects
+  unless fresh telemetry shows the aircraft stationary at no more than five
+  knots. Missing or stale flight telemetry must fail safe by sending the
+  disconnect alert. Incoming IVAO SERVER welcome messages during the first two
+  seconds of a confirmed connection remain in chat but do not trigger Push.
+  IVAO online confirmations are optional per browser device. User-started
+  three-minute UNICOM reminders are owned in memory by the local proxy, stay
+  synchronized across browsers, and notify every subscribed device at expiry.
+  The relay must not own or persist their countdown. A remote browser may also
+  opt into an agent-offline alert. Arm it only during a confirmed IVAO session,
+  disarm it on an observed FSD close before applying the normal disconnect
+  policy, and make relay reconnects cancel the offline grace period.
 - Preserve local operation without an account or relay.
 - Preserve multiple browser devices for one user's selected local agent.
 - Keep Settings scroll-contained, route weather reachable on short tablet

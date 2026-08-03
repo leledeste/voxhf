@@ -28,6 +28,13 @@ Requirements:
 | `npm.cmd run setup -- agent` | Connect the local agent to an existing relay. |
 | `npm run setup -- server` | Generate a Docker self-hosting environment. |
 | `npm.cmd run remote:test` | Temporary relay with two users, pairing, controls, RX/TX binary routing, and revocation. |
+| `npm.cmd run webapp:test` | Browser-state regressions for workspace accounts/sessions, chat history, Settings, iOS/iPadOS RX activation and recovery, notifications, UNICOM timer, reconnect recovery, radios, XPDR, and route weather. |
+| `npm.cmd run relay:account:test` | Hosted pilot-account registration, login, recovery, sessions, and deletion. |
+| `npm.cmd run relay:admin:test` | Relay-owner administration, sessions, recovery, and optional MFA paths. |
+| `npm.cmd run fsd:test` | Confirmed disconnect detection and stationary-aircraft suppression policy. |
+| `npm.cmd run webtx:test` | Web TX readiness and atomic TS2 session replacement across alternating UDP flows. |
+| `npm.cmd run unicom:test` | Deterministic three-minute reminder state and expiry behavior. |
+| `npm.cmd run watchdog:test` | Memory-only relay watchdog staging, expiry, reconnect, and delivery behavior. |
 | `npm.cmd run remote:check` | Compare local relay `.env` with `config.json` and check relay health. |
 | `npm.cmd audit` | Dependency vulnerability report. |
 | `npm.cmd run release:prepare` | Generate ignored release folders under `dist/`. |
@@ -35,7 +42,7 @@ Requirements:
 | `npm.cmd run release:test` | Extract all ZIPs and perform clean isolated installs. |
 | `npm.cmd run relay:backup:test` | Create, mutate, and restore a temporary SQLite database. |
 | `npm.cmd run update:test` | Download and stage Local through verified release metadata. |
-| `npm.cmd run release:version -- 0.1.1` | Synchronize package and update-policy versions. |
+| `npm.cmd run release:version -- <version>` | Synchronize package and update-policy versions. |
 
 Run `verify` and `remote:test` before every commit that changes the
 webapp, proxy, protocol, relay, database, or release layout.
@@ -46,7 +53,7 @@ webapp, proxy, protocol, relay, database, or release layout.
 | --- | --- |
 | `proxy.js` | Local-agent bootstrap and dependency wiring. |
 | `proxy/` | Pilot, FSD, TS2, Web TX, local web, state, and remote-agent modules. |
-| `webapp/` | Static HTML/CSS/JavaScript browser UI. |
+| `webapp/` | Static browser UI; `app.js` composes live flight state while `account.js` owns workspace account/session flows. |
 | `apps/relay/` | HTTP/WebSocket relay, SQLite, migrations, and admin page. |
 | `packages/protocol/` | Versioned remote envelopes and allowlists. |
 | `scripts/` | Tests, preflight, DB helpers, and release generation. |
@@ -167,7 +174,7 @@ GitHub CLI.
 Prepare a new release version before committing:
 
 ```powershell
-npm.cmd run release:version -- 0.1.1
+npm.cmd run release:version -- 0.1.2-beta.1
 # Add --minimum only for an intentionally incompatible/security release.
 npm.cmd run release:version:check
 npm.cmd run verify
