@@ -1,152 +1,99 @@
 # VoxHF Roadmap
 
-VoxHF is an experimental IVAO Altitude companion. This file tracks product
-status, not implementation history. Released changes belong in
-[CHANGELOG.md](../CHANGELOG.md).
+VoxHF is a working public beta. This file contains limitations and planned
+product work, not a duplicate feature list or release history. Current use is
+documented in the [User Guide](USER_GUIDE.md); completed release changes belong
+in [CHANGELOG.md](../CHANGELOG.md).
 
-## Working
+## Current Beta Focus
 
-### Local Agent
-
-- PilotUI/PilotCore bridge and automatic Ethernet/Wi-Fi IPv4 selection.
-- Parsed FSD chat, ATC, weather, flight-plan, and position state.
-- TS2 forwarding with automatic voice-server and TX-session refresh.
-- Modular local runtime and loopback webapp.
-
-### Webapp
-
-- Responsive desktop/mobile Light/Dark interface.
-- COM1/COM2, UNICOM, `_OBS` filtering, and distance sorting.
-- Squawk, STBY/ALT, and IDENT.
-- Frequency, broadcast, private messaging, and command completion.
-- Session chat recovery across local and remote devices after refresh or
-  reconnect, independently of notification permission.
-- Per-device Web Push for incoming private messages and public messages that
-  begin with the active callsign.
-- Optional per-device remote alert when the simulator PC or local proxy becomes
-  unreachable during a confirmed IVAO session, using memory-only sealed Push
-  tickets at the relay.
-- Proxy-owned three-minute UNICOM reminder synchronized across connected
-  devices, with an expiry Push alert.
-- METAR/TAF/ATIS, route weather, and plain-language weather interpretation.
-- Heartbeat and standby recovery.
-
-### Voice
-
-- Live RX in local and selected remote browsers.
-- Local and remote microphone TX on COM1/COM2.
-- Phone-as-microphone workflow.
-- Automatic TX session derivation across channel/server changes.
-- RX test and TX monitor.
-
-### Remote And Self-Hosting
-
-- HTTPS/WSS relay with strict origin checks.
-- Account registration/login and HttpOnly sessions.
-- Hashed per-user agent tokens.
-- Multiple browser devices for one user/agent.
-- Manual-token browser pairing.
-- SQLite users, agents, pairings, sessions, and audit events.
-- Admin panel, Docker Compose, and Caddy.
-- Remote controls, RX audio, TX audio, and update notices.
-
-### Installation And Operations
-
-- Secret-safe Local Slim, Hosted Webapp, Server, and Full Source ZIPs.
-- Package-specific lockfiles, SHA-256 sums, and isolated install tests.
-- Verified staged Local updates that preserve the previous installation.
-- Relay minimum-agent enforcement and recommended-version notices.
-- Consistent SQLite backup, integrity verification, restore, and pre-restore
-  preservation.
-- VPS setup, diagnostics, start, backup, restore, update, and rollback commands.
-- Tag-driven GitHub release workflow.
-- Clean Local Slim installation verified on a second Windows PC.
-- Backup, update, restore, and rollback verified on a live VPS deployment.
-
-## Implemented, Validation Pending
-
-- The 300 ms TX release tail is implemented, but onset/release clipping still
-  needs broader live-listener validation.
-- Remote RX/TX works on desktop and mobile browsers; additional networks,
-  devices, and simultaneous-listener combinations should remain part of beta
-  regression testing.
-- Automatic TX-session refresh works across channel and TS2 server changes,
-  but should remain covered by live regression tests because the observed
-  protocol can change.
-- Web Push delivery has been validated on Windows and on iOS with the screen
-  locked, including a live controller-addressed message.
-- The agent-offline watchdog has automated protocol, routing, expiry, reconnect,
-  endpoint, and delivery tests. Closing the proxy, shutting down the PC, and
-  losing the PC network path have also been validated against the deployed
-  relay, including delivery after connectivity returns.
+- Keep local and remote radio, chat, RX/TX, weather, notifications, accounts,
+  and self-hosting stable during real flights.
+- Continue live regression tests across Altitude/IVAO updates, TS2 regions,
+  browsers, mobile standby, and simultaneous listeners.
+- Complete independent security review and operational hardening before any
+  larger public hosted service.
+- Measure Local installation friction before deciding whether to build a signed
+  Windows installer or bundled portable runtime.
+- Define explicit release-candidate and beta-exit criteria from user feedback.
 
 ## Known Limitations
 
-- Observed IVAO/Altitude protocols can change without notice.
-- TX can sound slightly rougher than native Altitude.
-- Another listener is required for final TX confirmation.
-- Overlapping RX transmissions may clip or cut.
-- iOS changes audio route/volume while its microphone is active.
-- A newly loaded iOS/iPadOS workspace requires one trusted tap before audible
-  RX. VoxHF exposes this browser requirement with an activation prompt over the
-  radio panel and shows it again if automatic recovery after standby fails.
-- Automatic UNICOM voice reports are not currently supported or usable. Current
-  UNICOM support is limited to manual `122.800` selection, text messaging, and
-  the synchronized three-minute reminder.
-- Local Slim currently requires Node.js and ffmpeg to be installed separately.
-- Full automated Altitude/IVAO integration tests do not exist yet.
-- Self-hosted account and admin surfaces need broader production review.
-- The Local updater stages a new folder; it does not silently replace a running
-  installation or provide signed Windows binaries yet.
-- iOS/iPadOS Web Push requires a supported OS version and a Home Screen
-  installation of the hosted webapp.
+- VoxHF depends on observed IVAO/Altitude/FSD/TS2 behavior that can change
+  outside the project.
+- Full Altitude/IVAO integration cannot be reproduced in automated tests; voice
+  and controller-addressed notification behavior still needs live validation.
+- Browser TX may sound rougher than native Altitude, and overlapping RX can
+  clip or cut. A second listener remains the reliable TX-quality check.
+- A newly loaded iOS/iPadOS workspace needs one trusted tap before audible RX.
+  VoxHF exposes the requirement over the radio panel and repeats it only when
+  foreground recovery fails.
+- iOS may change its audio route/volume while the microphone is active.
+- Automatic UNICOM voice reports are not supported. Current UNICOM support is
+  manual frequency/text plus the synchronized three-minute reminder.
+- Local Slim requires Node.js and ffmpeg and is checksum-verified, but it is not
+  a signed Windows executable.
+- The Local updater stages a new folder instead of replacing a running install.
+- Account/admin surfaces and single-process rate limiting fit the documented
+  small self-hosted model; a public multi-instance relay needs further design
+  and review.
+- iOS/iPadOS Web Push requires a supported Home Screen webapp installation.
 
-## Next Priorities
+## Near-Term Product Work
 
-1. Scan every public branch, tag, and release artifact for secrets and rotate
-   development tokens.
-2. Enable CodeQL, Dependabot, secret scanning, and private vulnerability
-   reporting on GitHub.
-3. Complete an independent security review before opening registration or
-   expanding access to a VoxHF-operated relay.
-4. Decide whether a signed Windows installer/portable runtime is justified
-   after measuring Local Slim setup friction.
-5. Collect public-beta feedback, define explicit beta exit criteria, and
-   stabilize the release candidate.
+- Recognize METAR and TAF wind groups reported in metres per second (`MPS`),
+  including calm, variable wind, and gusts. Keep the original unit visible and
+  add the rounded knot equivalent without moving valid groups into
+  **Not interpreted**.
+- Add an explicit controller-voice mute/output control so users at the
+  simulator PC can avoid hearing Altitude and browser RX twice without changing
+  the current audio path silently.
+- Improve mobile audio-route recovery and make failure states easier to
+  diagnose without exposing packet-level controls.
+- Broaden METAR/TAF interpretation, edge cases, and explanatory tooltips.
+- Add a flight-progress view using the flight-plan route and current aircraft
+  coordinates. Candidate forms are a compact route strip or a map with the
+  aircraft, next waypoint, remaining distance, altitude, IAS, and Mach when the
+  local protocols provide reliable values.
+- Add a structured clearance/communication scratchpad.
+- Improve audit filtering and incident-oriented server diagnostics.
 
-The current account, session, recovery, optional MFA, relay, and core flight
-workflow test matrix has passed. These priorities cover the remaining release
-and operational work rather than repeating that completed functional test.
+## Features Requiring A Separate Product Decision
 
-## Planned Features
-
-- Broader weather abbreviation coverage, interpretation edge cases, and
-  explanatory tooltips.
-- Controlled automatic ATIS and route-weather refresh.
-- Experimental opt-in RX transcription with callsign context, without voice
-  recording or persistent audio storage.
-- Structured clearance scratchpad.
-- Guided UNICOM text and voice reports based on flight phase and available
-  aircraft data, building on the manual reminder. Any automatic transmission
-  behavior requires a separate product decision and live IVAO validation.
-- Airport map with taxi route highlighting.
-- Aircraft model detection and optional checklist.
-- Further mobile ergonomics and iOS audio-route refinements.
-- Richer audit filters.
-- Optional compressed remote audio if bandwidth requires it.
-
-## Long-Term Concepts
-
-- Shared cockpit access with explicit per-user permissions for radio tuning,
-  transponder controls, RX, and TX. This is deliberately deferred and is not a
-  current implementation priority.
+- Integrate the official IVAO Voice UNICOM service at `122.800` for manual
+  browser RX/TX. The local agent must use the official encrypted and signed
+  Voice session while IVAO retains propagation, terrain, attenuation, and
+  collision behavior. The protocol, live-capture plan, approval gate, and
+  current findings are preserved in [Voice Integration Research](VOICE_RESEARCH.md).
+- Evaluate a managed live IVAO frequency-listening page. Predictable coverage
+  requires an official read-only feed or authorized service identities; an
+  opt-in community source election can provide only explicitly labelled,
+  incomplete coverage. Public rebroadcasting requires IVAO authorization and a
+  separate privacy, load, abuse, and threat-model review. See
+  [Voice Integration Research](VOICE_RESEARCH.md).
+- Add privacy-preserving public activity counters for remote use: contributing
+  pilots, tracked flights, flight hours, and nautical miles. Calculations would
+  stay in the local agent and the server would persist aggregate counters, not
+  callsigns, routes, coordinates, or per-flight history. Local-only flights and
+  other self-hosted relays would not be included in the main site's totals.
+- Controlled automatic ATIS or route-weather refresh. Any polling must be
+  bounded and opt-in.
+- Guided UNICOM text/voice reports based on phase of flight, including the
+  known three-minute reporting rule. Automatic transmission requires live IVAO
+  validation, explicit user control, and a separate safety design.
+- Opt-in live RX transcription with callsign context. It must not introduce
+  voice recording or persistent audio storage.
+- Airport/taxi maps and route highlighting.
+- Aircraft model detection and optional checklists.
+- Compressed remote audio, only if measured bandwidth requires it.
 
 ## Not Planned
 
-- Public exposure of local PilotUI/PilotCore, FSD, or TS2 proxy ports.
-- Browser or relay storage of IVAO credentials.
-- Voice recording.
+- Publishing local PilotUI, PilotCore, FSD, TS2, or webapp ports.
+- Storing IVAO credentials in the browser or relay.
+- Voice recording or normal-operation voice dumps.
 - Persistent full chat history.
-- Open public registration on a VoxHF-operated relay before an independent
-  security review and an explicit hosting decision.
+- Mandatory MFA or Shared Cockpit.
 - Replacing Altitude or bypassing IVAO rules.
+- Open registration on a VoxHF-operated public relay before independent review
+  and an explicit hosting/legal decision.

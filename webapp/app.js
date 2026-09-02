@@ -2489,6 +2489,10 @@ function setComLabel(com, freq, station = '') {
   const input = $(`com${com}-input`);
   if (document.activeElement !== input) input.value = value;
   renderStationMenus();
+  // Frequency-chat relevance follows the radios currently reported by
+  // Altitude. Re-rendering here hides the previous channel and reveals any
+  // retained messages for the newly tuned COM without discarding history.
+  renderMessages();
 }
 
 function restoreComFrequencies(values, stations) {
@@ -3315,9 +3319,31 @@ function updateComposerContext() {
 function messageMatchesCurrentTab(msg) {
   // All filtering decisions live here so render and private-close behavior
   // cannot disagree about what the active tab contains.
+  if (!isRelevantFrequencyMessage(msg)) return false;
   if (state.filter === 'all') return true;
   if (state.filter === 'private-peer') return msg.type === 'private' && privatePeerForMessage(msg) === state.privatePeer;
   return msg.type === state.filter;
+}
+
+function isRelevantFrequencyMessage(msg) {
+  // IVAO frequency recipients omit the leading 1 and decimal point:
+  // @22800 is 122.800, @26805 is 126.805. UNICOM remains globally visible;
+  // other incoming frequency traffic is shown only for an active COM radio.
+  // Outgoing and malformed/unknown records stay visible so VoxHF never hides
+  // a message the pilot deliberately sent or cannot classify safely.
+  if (!msg || msg.type !== 'frequency' || msg.direction === 'outgoing') return true;
+  const recipient = String(msg.recipient || '').trim().toUpperCase();
+  if (recipient === '@22800') return true;
+  const match = recipient.match(/^@(\d{2})(\d{3})$/);
+  if (!match) return true;
+
+  const frequency = normalizeFreq(`1${match[1]}.${match[2]}`);
+  if (!frequency) return true;
+  const activeFrequencies = [state.comFrequencies[1], state.comFrequencies[2]]
+    .map(normalizeFreq)
+    .filter(Boolean);
+  if (!activeFrequencies.length) return true;
+  return activeFrequencies.includes(frequency);
 }
 
 function closePrivateChat(peer) {
@@ -3835,6 +3861,7 @@ if (globalThis.__VOXHF_FRONTEND_TEST__ === true) {
     privatePeerForMessage,
     setActiveChatFilter,
     messageMatchesCurrentTab,
+    isRelevantFrequencyMessage,
     closePrivateChat,
   };
 } else {

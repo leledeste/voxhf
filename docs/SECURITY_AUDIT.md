@@ -1,6 +1,6 @@
 # Security Audit Baseline
 
-Date: 2026-08-03
+Last verified: 2026-08-05
 
 This is an internal engineering review of the public-beta VoxHF codebase. It
 documents verified controls and remaining risks; it is not a third-party
@@ -87,9 +87,10 @@ penetration test or a guarantee that the software is vulnerability-free.
 
 1. Complete the real-device passkey matrix; automated WebAuthn preflight and
    recovery-path tests are implemented.
-2. Put upstream connection and authentication limits in front of any public
+2. Enable and verify repository secret scanning, dependency updates, static
+   analysis, and private vulnerability reporting.
+3. Put upstream connection and authentication limits in front of any public
    multi-instance relay.
-3. Run an independent code review and targeted penetration test.
-4. Exercise backup/restore and incident token-rotation procedures.
+4. Run an independent code review and targeted penetration test.
 5. Repeat dependency, browser, Windows, Linux, iOS, and live IVAO tests for the
    release candidate.

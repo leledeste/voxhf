@@ -1,207 +1,108 @@
-# VoxHF Remote Threat Model
+# VoxHF Threat Model
 
-Status: implemented baseline with planned hardening. This document covers the
-current remote architecture and the controls still required before broader use.
+This model describes the implemented local and remote architecture. The local
+agent is trusted with simulator/IVAO access; browsers and relay connections are
+authenticated but still treated as potentially compromised inputs.
 
 ## Assets
 
-- User account.
-- Paired device tokens.
-- Local agent control channel.
-- Radio tuning state.
-- Chat sending capability.
-- Web TX capability.
-- Browser microphone permission.
-- IVAO/FSD/TS2 live traffic passing through the local agent.
-- Security logs.
+- Pilot and owner accounts, passwords, sessions, and recovery material.
+- Agent tokens, browser pairings, notification credentials, and watchdog
+  tickets.
+- Radio, XPDR, chat, weather, and Web TX capabilities.
+- Microphone permission and live RX/TX audio.
+- Parsed IVAO/FSD/TS2 state and local configuration.
+- SQLite data, logs, backups, and deployment secrets.
 
 ## Trust Boundaries
 
 ```text
 Browser
-  | untrusted network
-Relay
-  | untrusted network
-Local Agent
+  | HTTPS/WSS over an untrusted network
+Relay and account/admin service
+  | WSS over an untrusted network
+Local VoxHF agent
   | local machine boundary
 Altitude / PilotCore / IVAO
 ```
 
-The browser, relay, and agent must authenticate each other at their boundary. The relay must never assume a connected socket can do everything.
+The relay authenticates users/devices and routes only approved protocol types.
+The local agent validates again before changing simulator or network state. A
+successful connection never implies permission to send every message type.
 
-## Main Threats
+## Threats And Controls
 
-### Unauthorized Remote Control
+| Threat | Main controls |
+| --- | --- |
+| Public access to privileged local ports | Local binding, outbound-only remote agent, deployment documentation, no relay tunnel for those ports |
+| Unauthorized radio/chat/XPDR/TX control | Account/token authentication, browser pairing, user/device scoping, protocol source allowlists, agent-side validation and rate limits |
+| Cross-site WebSocket or cookie abuse | Exact Origin checks, HttpOnly Secure SameSite cookies, scoped admin path/session, JSON/content checks |
+| Stolen agent token or browser session | Hashed stored secrets, revocation/rotation, session listing, logout-other-devices, short-lived recovery codes |
+| Pairing/invite guessing or reuse | Memory-only one-use codes, expiry, authenticated ownership, rate limits |
+| TX continuing after user intent ends | Explicit PTT action, visible state, duration limit, release tail, stop on browser/relay/agent/pairing/device disconnect |
+| Malformed or hostile audio | Fixed ffmpeg argument arrays without a shell, streamed stdin/stdout, bounded frame sizes/settings, process cleanup |
+| Command or connection flood | Per-connection/IP limits, message/command size and rate limits, maximum clients, close/reject behavior |
+| State desynchronization after reconnect | Local agent as source of truth, compact state/history snapshots, selected-agent checks, fail-closed TX |
+| Secret/message/audio leakage through logs | Allowlisted metadata only, bounded Docker logs, privacy defaults, tests rejecting forbidden persistence/logging paths |
+| Supply-chain or release tampering | Locked dependencies, license/audit checks, package-content verification, SHA-256 release manifests; no signed Windows binary yet |
+| Backup or database exposure | Private Docker volume/host directory, no secrets/audio/chat in SQLite, checksum/integrity verification, operator access controls |
 
-An attacker controls radio, chat, XPDR, or TX.
+## Relay Operator Trust
 
-Controls:
+HTTPS/WSS protects traffic from the network, not from the relay process or its
+operator. A relay necessarily sees the parsed state, commands, message content,
+and live audio it routes. End-to-end encryption between browser and local agent
+is not implemented.
 
-- Strong authentication.
-- Device pairing.
-- Per-message authorization.
-- Token revocation.
-- Local kill switch.
+Mitigations are open source, self-hosting, deployment-specific privacy notices,
+minimal persistence, and the ability to use local-only mode. Users must not
+treat an unknown relay operator as a zero-trust intermediary.
 
-### Cross-Site WebSocket Hijacking
+## Offline Watchdog Threats
 
-A malicious website tries to open a WebSocket using the user's browser session.
-
-Controls:
-
-- Strict `Origin` allowlist.
-- SameSite cookies if cookies are used.
-- Token-based WebSocket auth.
-- Message-level authorization.
-
-### Stolen Device Token
-
-An attacker steals the agent token.
-
-Controls:
-
-- Store only hashed tokens on the relay.
-- Make tokens revocable.
-- Show active devices.
-- Rotate tokens after suspected compromise.
-- Keep local token file permissions tight.
-
-### Pairing Code Abuse
-
-An attacker guesses or reuses a pairing code.
+The optional PC/proxy offline alert temporarily gives the relay a Push endpoint
+and request already encrypted and signed by the local proxy.
 
 Controls:
 
-- Short-lived code.
-- One-time use.
-- Rate-limit attempts.
-- Bind pairing to authenticated user session.
-- Show device details before confirmation.
+- only the authenticated agent can stage, commit, or disarm a ticket batch;
+- browsers cannot send watchdog protocol types;
+- the VAPID private key and subscription encryption keys remain local;
+- signatures expire within 15 minutes and tickets are one-use/memory-only;
+- HTTPS port 443, no credentials/IP literals, and known or explicitly trusted
+  Push origins are enforced;
+- reconnect cancels the offline grace period;
+- logs contain counts, never endpoint, authorization header, or encrypted body.
 
-### Malicious Relay Operator
+Residual risk: a malicious relay can replay the exact sealed alert before its
+signature expires. It cannot decrypt/alter it, create another signed alert, or
+use it after expiry.
 
-A relay operator inspects or modifies traffic.
+## Explicitly Forbidden Capabilities
 
-Controls:
+- raw FSD, TS2, or PilotCore tunnels through the relay;
+- unauthenticated remote control;
+- public exposure of local agent ports;
+- voice recording or normal-operation packet/audio dumps;
+- persistent full chat history;
+- relay storage of IVAO credentials or local VAPID private keys.
 
-- Open source code.
-- Self-hosting support.
-- Optional end-to-end encryption for remote payloads.
-- No required official relay.
-- Clear privacy documentation.
+## Residual Risks
 
-### Audio Abuse
+- Observed Altitude/IVAO/TS2 behavior may change outside VoxHF's control.
+- The local agent and its host are privileged; compromise of the simulator PC
+  can bypass browser/relay protections.
+- A compromised paired browser can act within that user's allowed controls
+  until its session/pairing is revoked.
+- The single-process in-memory rate limits are appropriate for the documented
+  small VPS model, not horizontal scaling without a shared atomic limiter.
+- Web TX and browser media policies depend on browser/OS behavior and still
+  require live regression testing.
+- Release ZIP integrity is checksum-verifiable but not backed by a signed
+  Windows executable/installer.
+- Internal review does not replace independent penetration testing or legal
+  review for a public hosted service.
 
-Remote TX stays active after disconnect or is triggered without user intent.
-
-Controls:
-
-- PTT requires user gesture.
-- Stop TX on disconnect.
-- Maximum PTT duration.
-- Agent-side TX timeout.
-- Local visible remote-TX indicator.
-- Local kill switch.
-
-### Untrusted Audio Parsing
-
-The local agent decodes and encodes voice through ffmpeg. Audio bytes originate
-from live TS2 traffic or browser microphone streams, so they must be treated as
-untrusted parser input even when ffmpeg is launched without a shell.
-
-Controls:
-
-- Invoke ffmpeg with fixed argument arrays, never shell-built command strings.
-- Stream audio through stdin/stdout instead of file paths controlled by peers.
-- Keep codec settings in a small validated configuration surface.
-- Stop decoder/encoder processes on disconnect.
-- Keep ffmpeg updated through normal system package updates.
-
-### Remote Command Flood
-
-A paired browser, compromised browser session, or compromised relay sends
-authorized commands at an unsafe rate.
-
-Controls:
-
-- Relay-side rate limits for pairing, chat, tuning, XPDR, and TX.
-- Agent-side rate limits before touching PilotCore/FSD.
-- No raw protocol tunnel.
-- Visible local state updates when remote commands change radio or XPDR state.
-
-### State Desynchronization
-
-The browser, relay, agent, and Altitude disagree about current radio, XPDR, TX,
-or connection state after reconnects or dropped messages.
-
-Controls:
-
-- Treat the local agent and IVAO/FSD feedback as source of truth.
-- Replay compact state snapshots after browser reconnect and device selection.
-- Drop remote commands when the agent is disconnected from IVAO.
-- Make remote TX fail closed on browser, relay, or agent disconnect.
-
-### Denial of Service
-
-Attackers overload relay, pairing, login, or WebSocket resources.
-
-Controls:
-
-- Rate limits.
-- Message size limits.
-- Connection limits.
-- Idle timeouts.
-- Backpressure handling.
-- Separate security logs for abuse.
-
-### Sensitive Logging
-
-Logs accidentally include chat, raw packets, audio, or secrets.
-
-Controls:
-
-- Structured logging allowlist.
-- Redaction.
-- No payload logging by default.
-- Short retention.
-- Review logging in code review.
-
-### Offline Watchdog Ticket Abuse
-
-A compromised browser attempts to arm the relay, or a compromised relay tries
-to reuse a temporary Push request or redirect it to an internal service.
-
-Controls:
-
-- Only the authenticated current agent can stage, commit, or disarm watchdog
-  batches; browsers cannot send those protocol types.
-- The local proxy creates the encrypted payload and VAPID signature and never
-  shares its private key or subscription encryption keys.
-- Ticket VAPID signatures expire within 15 minutes. Honest relays replace them
-  atomically, delete them before sending, and keep them in memory only.
-- Push destinations require HTTPS on port 443, reject IP literals and
-  credentials, and are restricted to known browser Push origins or explicit
-  operator additions.
-- Reconnect cancels the grace timer, and only a successfully accepted relay
-  delivery suppresses the local retry path.
-- Relay logs contain delivery counts only, never endpoints, authorization
-  headers, or encrypted bodies.
-
-Residual trust: a malicious relay operator could replay the exact sealed alert
-until its signature expires. The operator still cannot decrypt or modify the
-payload, generate another signed payload, or use it after expiry.
-
-## Explicitly Disallowed Remote Capabilities
-
-- Raw FSD command tunnel.
-- Raw TS2 packet tunnel from browser.
-- Raw PilotCore command tunnel.
-- Unauthenticated WebSocket control.
-- Publicly exposed local agent ports.
-
-## Open Questions
-
-- Whether to implement end-to-end payload encryption before or after the first relay prototype.
-- Which authentication hardening should become mandatory if an official relay
-  is ever offered.
-- Whether a future official public relay should exist beyond invite-only beta.
+Secure deployment instructions are in [SECURITY.md](../SECURITY.md) and
+[Self-Hosting](SELF_HOSTING.md). Stored-data details are in
+[Privacy Architecture](PRIVACY.md).

@@ -1,11 +1,11 @@
 # VoxHF Relay
 
-The relay connects one local VoxHF agent to trusted remote browsers. It routes
-validated state, commands, and live audio; it does not connect to IVAO itself.
+The relay connects authenticated remote browsers to a selected local VoxHF
+agent. It routes validated state, commands, messages, and live audio; it does
+not connect to IVAO or expose the agent's local ports.
 
-For full VPS instructions see
-[Self-Hosting](../../docs/SELF_HOSTING.md). For tests and database helpers see
-[Development](../../docs/DEVELOPMENT.md).
+Use [Self-Hosting](../../docs/SELF_HOSTING.md) for a production VPS. This file is
+the direct-development reference for the relay component.
 
 ## Run Locally
 
@@ -14,119 +14,61 @@ Copy-Item apps\relay\.env.example apps\relay\.env
 npm.cmd run relay:env
 ```
 
-Set a real token in `apps/relay/.env` before starting:
+Replace every placeholder needed by the selected mode. A minimal private test:
 
 ```env
 VOXHF_RELAY_HOST=127.0.0.1
 VOXHF_RELAY_PORT=8787
-VOXHF_RELAY_TOKEN=hex-token-from-openssl-rand-hex-32
+VOXHF_RELAY_TOKEN=replace-with-a-random-32-byte-hex-token
 VOXHF_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 VOXHF_RELAY_REQUIRE_PAIRING=true
 VOXHF_RELAY_AUTH_MODE=env
 ```
 
-For a full VPS deployment, the recommended path is:
+Health is available at `http://127.0.0.1:8787/health`. The exact environment
+reference is [apps/relay/.env.example](.env.example); production Docker defaults
+are in [infra/docker/defaults.env](../../infra/docker/defaults.env).
 
-```bash
-docker run --rm -it -v "$PWD:/work" -w /work node:20-alpine node scripts/setup.js server
-```
+## Authentication Modes
 
-It generates `infra/docker/.env`; this development `.env` remains useful for
-running the relay directly without Docker. When Node.js is already installed
-on the host, `npm run setup -- server` is equivalent.
-
-Docker deployments load safe, Git-tracked values from
-`infra/docker/defaults.env`, then private values from `infra/docker/.env`.
-The private file wins, so normal updates receive new defaults without replacing
-domains or secrets. Direct non-Docker development continues to use
-`apps/relay/.env.example` as the complete reference.
-
-Health:
-
-```text
-http://127.0.0.1:8787/health
-```
-
-WebSocket sources are restricted to `agent` and `browser`. Unknown
-message types, raw proxy commands, invalid origins, invalid tokens, and
-unauthorized device access are rejected.
-
-## Authentication
-
-| Mode | Token source | Use |
+| Mode | Credential source | Intended use |
 | --- | --- | --- |
-| `env` | `VOXHF_RELAY_TOKEN` and `VOXHF_RELAY_USERS` | Small private relay. |
-| `sqlite-fallback` | SQLite plus env tokens | Short migration/test period. |
-| `sqlite` | Active SQLite agent tokens | Stable multi-user relay. |
+| `env` | `VOXHF_RELAY_TOKEN` / `VOXHF_RELAY_USERS` | Private direct test or small token relay |
+| `sqlite-fallback` | SQLite plus env tokens | Temporary migration/testing |
+| `sqlite` | Active hashed SQLite agent tokens | Account deployment |
 
-Browsers on a self-hosted instance can register/login when SQLite auth is active and
-`VOXHF_RELAY_ENABLE_REGISTRATION=true`. Browser sessions use an HttpOnly
-cookie. Registration requires a one-time in-memory admin invite by default;
-agent tokens are shown once and stored hashed.
+Account login/registration requires SQLite mode and
+`VOXHF_RELAY_ENABLE_REGISTRATION=true`. Registration is invite-only by default.
+Pilot and admin browser sessions use separate HttpOnly cookies. The Node agent
+uses `Authorization: Bearer <token>` during the WebSocket upgrade.
 
-The public repository ships neutral legal templates. Before opening
-registration to other people, provide deployment-specific Terms and Privacy
-pages and set `VOXHF_LEGAL_TERMS_VERSION` and
-`VOXHF_LEGAL_PRIVACY_VERSION`. Docker operators can mount private pages with
-`VOXHF_LEGAL_TERMS_FILE` and `VOXHF_LEGAL_PRIVACY_FILE`; those files do not
-belong in the source repository.
+`VOXHF_RELAY_ALLOW_AGENT_QUERY_TOKEN=true` accepts older agents temporarily.
+Disable it after every connected agent is current.
 
-The Node agent sends its token in the WebSocket upgrade `Authorization` header.
-`VOXHF_RELAY_ALLOW_AGENT_QUERY_TOKEN=true` temporarily accepts older agents;
-set it to `false` after every agent has been updated.
+## Administration
 
-Logged-in pilots can list and revoke browser sessions, log out other devices,
-and change their password from the webapp settings. If a password is lost, the
-owner creates a one-use recovery code from the Users page; codes expire after
-`VOXHF_RELAY_ACCOUNT_RECOVERY_TTL_MS` and are stored only as hashes.
+Account-mode administration is at `/admin`. A separate
+`VOXHF_RELAY_ADMIN_TOKEN` creates or recovers the owner; daily access uses the
+owner password/session. Optional passkey MFA, recovery codes, user/invite/token
+management, pairings, devices, sessions, and optional audit events are covered
+in [Administration](../../docs/ADMINISTRATION.md).
 
-Manual token browsers use short-lived pairing codes. Pairing records are stored
-in JSON for env mode and SQLite for SQLite modes.
+## Data Boundary
 
-## Admin
+SQLite stores account, hashed credential, pairing, device, session, legal
+acceptance, and optional bounded audit records. Agents, live routing, pairing
+codes, invites, and normal message/audio state are held in memory as needed.
+Voice and chat history are never persisted by the relay.
 
-Set a separate `VOXHF_RELAY_ADMIN_TOKEN` and open:
+The optional PC/proxy offline alert keeps sealed short-lived Push requests in
+process memory only. They are already encrypted and signed by the local agent,
+deleted before one-use delivery, and excluded from SQLite, logs, audits, and
+backups.
 
-```text
-https://relay.example.com/admin
-```
+See [Privacy Architecture](../../docs/PRIVACY.md) and the
+[Threat Model](../../docs/THREAT_MODEL.md).
 
-On the first visit, use that token once to create the owner account. Later
-visits use the owner username and password through a short-lived HttpOnly admin
-session. The token remains available for break-glass password recovery and must
-stay in a password manager.
-
-The owner may optionally enable passkey MFA from **Security**. MFA is never
-forced by the relay: accounts without a passkey continue to use password login.
-When enabled, a passkey or one-use recovery code completes login. Recovery
-codes are shown once and stored only as hashes. Break-glass recovery resets the
-password, revokes admin sessions, and removes MFA so a lost authenticator cannot
-lock the owner out permanently.
-
-The panel manages registration invites, users, agent tokens, devices, pairings,
-admin sessions, password changes, and optional audit events. Account-based
-administration is disabled in `env` mode.
-
-## Live Data
-
-The relay keeps agents and live audio routing in memory. SQLite stores the
-account, hashed token, pairing, session, and device records needed for access.
-Voice audio and chat history are never persisted. IP/user-agent session
-metadata and audit history are opt-in and disabled by default.
-
-The optional PC/proxy offline alert keeps short-lived sealed Push requests in
-relay process memory while a confirmed IVAO session is armed. The requests are
-already encrypted and signed by the local proxy, are deleted before one-time
-delivery, and are never written to SQLite, audits, logs, or backups. The relay
-uses native WebSocket Ping frames plus a 30-second offline grace period by
-default.
-
-The relay checks backup storage at startup and once per day. Recognized SQLite
-backups, their checksum metadata, and pre-restore database copies are removed
-after `VOXHF_BACKUP_RETENTION_DAYS` (30 days by default). Unrelated files are
-never selected by this cleanup.
-
-## Tests
+## Verification
 
 ```powershell
 npm.cmd run verify
@@ -134,44 +76,14 @@ npm.cmd run remote:test
 npm.cmd run relay:account:test
 npm.cmd run relay:admin:test
 npm.cmd run watchdog:test
-npm.cmd run remote:check
+npm.cmd run relay:backup:test
+```
+
+For an HTTPS deployment with passkeys:
+
+```powershell
 npm.cmd run relay:mfa:preflight -- https://relay.example.com
 ```
 
-## Important Environment Variables
-
-- `VOXHF_ALLOWED_ORIGINS`
-- `VOXHF_RELAY_AUTH_MODE`
-- `VOXHF_RELAY_DATABASE`
-- `VOXHF_RELAY_ADMIN_TOKEN`
-- `VOXHF_RELAY_ADMIN_SESSION_TTL_MS`
-- `VOXHF_RELAY_ADMIN_SESSION_IDLE_TTL_MS`
-- `VOXHF_RELAY_ADMIN_MFA_CHALLENGE_TTL_MS`
-- `VOXHF_RELAY_ACCOUNT_RECOVERY_TTL_MS`
-- `VOXHF_RELAY_ALLOW_AGENT_QUERY_TOKEN`
-- `VOXHF_RELAY_WEBAUTHN_RP_ID` (optional; defaults to the admin origin host)
-- `VOXHF_RELAY_WEBAUTHN_RP_NAME`
-- `VOXHF_RELAY_ENABLE_REGISTRATION`
-- `VOXHF_RELAY_REQUIRE_REGISTRATION_INVITE`
-- `VOXHF_LEGAL_TERMS_VERSION`
-- `VOXHF_LEGAL_PRIVACY_VERSION`
-- `VOXHF_LEGAL_EFFECTIVE_DATE`
-- `VOXHF_RELAY_STORE_SESSION_METADATA`
-- `VOXHF_RELAY_PERSIST_AUDIT`
-- `VOXHF_RELAY_AUDIT_RETENTION_DAYS`
-- `VOXHF_RELAY_REQUIRE_PAIRING`
-- `VOXHF_RELAY_DATA_DIR`
-- `VOXHF_BACKUP_DIR`
-- `VOXHF_BACKUP_RETENTION_DAYS`
-- `VOXHF_RELAY_MAX_CLIENTS`
-- `VOXHF_RELAY_MAX_MESSAGES_PER_WINDOW`
-- `VOXHF_RELAY_MAX_COMMANDS_PER_WINDOW`
-- `VOXHF_RELAY_MAX_AUTH_ATTEMPTS_PER_WINDOW`
-- `VOXHF_RELAY_MAX_ADMIN_ATTEMPTS_PER_WINDOW`
-- `VOXHF_RELAY_MAX_AUDIO_FRAME_BYTES`
-- `VOXHF_RELAY_MAX_REMOTE_TX_DURATION_MS`
-- `VOXHF_AGENT_HEARTBEAT_INTERVAL_MS`
-- `VOXHF_AGENT_WATCHDOG_OFFLINE_DELAY_MS`
-- `VOXHF_WATCHDOG_PUSH_ORIGINS` (optional exact HTTPS Push origins)
-
-Use `apps/relay/.env.example` as the complete reference.
+Database helpers, diagnostics, and the full test matrix are in
+[Development](../../docs/DEVELOPMENT.md).

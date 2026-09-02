@@ -12,6 +12,7 @@ const vm = require('vm');
 const root = path.resolve(__dirname, '..');
 const accountModule = require(path.join(root, 'webapp', 'account.js'));
 const accountSource = fs.readFileSync(path.join(root, 'webapp', 'account.js'), 'utf8');
+const weatherSource = fs.readFileSync(path.join(root, 'webapp', 'weather.js'), 'utf8');
 const appSource = fs.readFileSync(path.join(root, 'webapp', 'app.js'), 'utf8');
 
 class FakeClassList {
@@ -466,6 +467,7 @@ function createHarness(options = {}) {
   context.globalThis = context;
 
   vm.runInContext(accountSource, context, { filename: 'webapp/account.js' });
+  vm.runInContext(weatherSource, context, { filename: 'webapp/weather.js' });
   vm.runInContext(appSource, context, { filename: 'webapp/app.js' });
   return {
     app: context.__VOXHF_FRONTEND_TEST_HOOKS__,
@@ -535,6 +537,38 @@ test('chat history survives duplicate recovery and closing a private tab', () =>
 
   app.setActiveChatFilter('all');
   assert.strictEqual(app.state.messages.filter(app.messageMatchesCurrentTab).length, 3);
+});
+
+test('frequency chat keeps UNICOM and active COM traffic only', () => {
+  const { app } = createHarness();
+  app.state.comFrequencies[1] = '126.805';
+  app.state.comFrequencies[2] = '131.055';
+
+  const unicom = { type: 'frequency', recipient: '@22800', direction: 'incoming' };
+  const com1 = { type: 'frequency', recipient: '@26805', direction: 'incoming' };
+  const com2 = { type: 'frequency', recipient: '@31055', direction: 'incoming' };
+  const unrelated = { type: 'frequency', recipient: '@25000', direction: 'incoming' };
+  const sentElsewhere = { type: 'frequency', recipient: '@25000', direction: 'outgoing' };
+  const privateMessage = { type: 'private', recipient: 'MHL212', direction: 'incoming' };
+
+  app.state.filter = 'all';
+  assert.strictEqual(app.messageMatchesCurrentTab(unicom), true, 'UNICOM must remain visible');
+  assert.strictEqual(app.messageMatchesCurrentTab(com1), true, 'COM1 traffic must remain visible');
+  assert.strictEqual(app.messageMatchesCurrentTab(com2), true, 'COM2 traffic must remain visible');
+  assert.strictEqual(app.messageMatchesCurrentTab(unrelated), false, 'untuned frequency traffic must be hidden');
+  assert.strictEqual(app.messageMatchesCurrentTab(sentElsewhere), true, 'sent messages must remain visible');
+  assert.strictEqual(app.messageMatchesCurrentTab(privateMessage), true, 'private chat behavior must remain unchanged');
+
+  app.state.filter = 'frequency';
+  assert.strictEqual(app.messageMatchesCurrentTab(unicom), true);
+  assert.strictEqual(app.messageMatchesCurrentTab(com1), true);
+  assert.strictEqual(app.messageMatchesCurrentTab(com2), true);
+  assert.strictEqual(app.messageMatchesCurrentTab(unrelated), false);
+  assert.strictEqual(app.messageMatchesCurrentTab(privateMessage), false);
+
+  app.state.comFrequencies[1] = '125.000';
+  assert.strictEqual(app.messageMatchesCurrentTab(com1), false, 'old COM traffic must hide after retuning');
+  assert.strictEqual(app.messageMatchesCurrentTab(unrelated), true, 'new COM traffic must become visible');
 });
 
 test('Settings locks and restores the workspace scroll position', () => {
@@ -869,6 +903,36 @@ test('radio, transponder, flight-plan, and weather updates reach visible state',
   assert.strictEqual(document.getElementById('settings-flight-plan').textContent, 'LIRF -> EGLL');
   assert.match(document.getElementById('weather-panel').innerHTML, /LIRF 021020Z 23008KT CAVOK/);
   assert.match(document.getElementById('weather-panel').innerHTML, /TAF EGLL 021100Z/);
+});
+
+test('weather interpreter explains unavailable fields and keeps remarks together', () => {
+  const { window } = createHarness();
+  const metar = window.VoxHFWeather.interpretMetar(
+    'MKJP 020800Z 11007KT //// ////// 28/24 Q1013 RMK CLD FROM CEILOMETER RWY 30 NCD',
+  );
+
+  assert.ok(metar);
+  assert.ok(metar.rows.some(row => row.label === 'Visibility' && row.value === 'Not available'));
+  assert.ok(metar.rows.some(row => row.label === 'Cloud' && row.value === 'Not available'));
+  assert.ok(metar.rows.some(row => (
+    row.label === 'Remarks'
+      && row.value === 'Runway 30 ceilometer: no cloud detected'
+  )));
+  assert.ok(!metar.rows.some(row => row.label === 'Not interpreted'));
+
+  const taf = window.VoxHFWeather.interpretTaf(
+    'TAF MKJP 020800Z 0209/0315 11007KT //// ////// RMK SENSOR DATA UNAVAILABLE',
+  );
+  assert.ok(taf.rows.some(row => (
+    row.label === 'Base forecast Visibility' && row.value === 'Not available'
+  )));
+  assert.ok(taf.rows.some(row => (
+    row.label === 'Base forecast Cloud' && row.value === 'Not available'
+  )));
+  assert.ok(taf.rows.some(row => (
+    row.label === 'Base forecast Remarks' && row.value === 'SENSOR DATA UNAVAILABLE'
+  )));
+  assert.ok(!taf.rows.some(row => row.label === 'Not interpreted'));
 });
 
 async function runTests() {

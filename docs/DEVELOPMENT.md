@@ -1,13 +1,14 @@
 # VoxHF Development
 
-This guide contains commands and diagnostics for contributors. User setup stays
-in the root [README](../README.md); VPS setup stays in
+This guide contains commands and diagnostics for contributors. Pilot setup is
+in [Local Installation](INSTALL_LOCAL.md), operation is in the
+[User Guide](USER_GUIDE.md), and VPS setup is in
 [Self-Hosting](SELF_HOSTING.md).
 
 ## Setup
 
 ```powershell
-npm.cmd install
+npm.cmd ci
 npm.cmd run setup -- local
 npm.cmd run verify
 ```
@@ -144,7 +145,7 @@ npm.cmd run relay:db:import-users -- --env apps/relay/.env --db .voxhf-relay/vox
 The admin page is `/admin` on the relay origin. In SQLite modes the first visit
 uses `VOXHF_RELAY_ADMIN_TOKEN` to bootstrap the owner account; normal access
 then uses the owner password and a server-side admin session. The token remains
-the break-glass recovery credential. See [Administration Redesign](ADMIN_REDESIGN.md).
+the break-glass recovery credential. See [Administration](ADMINISTRATION.md).
 
 ## Auth Modes
 
@@ -152,8 +153,9 @@ the break-glass recovery credential. See [Administration Redesign](ADMIN_REDESIG
 - `sqlite-fallback`: SQLite tokens plus env tokens during migration/testing.
 - `sqlite`: SQLite is the only token source.
 
-New private deployments should prove basic connectivity in `env`, test
-SQLite through `sqlite-fallback`, then switch to `sqlite`.
+New private-token deployments use `env`. New account deployments can start
+directly in `sqlite`. Use `sqlite-fallback` only for a temporary migration from
+existing env tokens.
 
 ## Release Preparation
 

@@ -1,8 +1,11 @@
-# Local Installation
+# Install The VoxHF Local Agent
 
-`voxhf-local` is the lightweight Windows package for normal pilots. It contains
-the local agent and browser UI, but not the relay, SQLite, Docker, or admin
-panel. Git is not required.
+The Local package runs on the same Windows PC as IVAO Altitude. It contains the
+local Node.js agent and operational webapp, but not the relay, accounts, SQLite,
+Docker, or server administration. Git is not required for the release ZIP.
+
+After installation, use the [User Guide](USER_GUIDE.md) for every workspace
+feature and example.
 
 ## Requirements
 
@@ -11,14 +14,14 @@ panel. Git is not required.
 - Node.js 20 or newer.
 - ffmpeg with Speex encoding and decoding support.
 
-Install the external requirements when needed:
+Install missing tools with Winget:
 
 ```powershell
 winget install OpenJS.NodeJS.LTS
 winget install Gyan.FFmpeg
 ```
 
-Open a new terminal after installation and verify:
+Open a new PowerShell window and verify them:
 
 ```powershell
 node --version
@@ -26,49 +29,75 @@ ffmpeg -hide_banner -encoders | findstr speex
 ffmpeg -hide_banner -decoders | findstr speex
 ```
 
-## Install And Start
+The Node version must be 20 or newer and both ffmpeg searches must list Speex.
 
-1. Extract the complete `voxhf-local-<version>.zip` archive to a normal user
-   folder, for example `C:\Users\YourName\VoxHF`.
-2. Double-click `start.bat`.
-3. On first launch, VoxHF installs its small npm dependency set and opens the
-   setup wizard.
-4. Choose the local-only or remote-agent setup and keep automatic IP detection
-   unless there is a specific reason to select an interface manually.
-5. Start PilotUI and enter the IPv4 address printed by VoxHF as the Simulator
-   Address.
-6. Open `http://localhost:3000`.
+## Install From The Release ZIP
 
-`config.json` contains private local settings and agent credentials. Back it up
-before replacing the installation folder and never publish it.
+1. Download `voxhf-local-<version>.zip` from the
+   [latest release](https://github.com/leledeste/voxhf/releases/latest).
+2. Extract the complete archive to a normal user folder, for example
+   `C:\Users\YourName\VoxHF`. Do not run it from inside the ZIP.
+3. Double-click `start.bat`.
+4. On the first launch, the script installs the exact locked runtime packages
+   and creates `config.json` with the tested local defaults.
+5. Keep the VoxHF console open. It prints the local URLs and the IPv4 address
+   that PilotUI must use.
+6. Start PilotUI. Set its **Simulator Address** to that printed IPv4 address,
+   then connect Altitude normally.
+7. Open [http://localhost:3000](http://localhost:3000).
+8. Confirm **Link: Online**, the correct callsign, and the flight-plan airports.
 
-## Connect To A Remote Server
+If Windows Firewall asks about Node.js, allow it only on the private network
+used by the simulator. Do not forward or publish VoxHF's local ports.
 
-Local mode needs no account and stays at `http://localhost:3000`. To use a
-server hosted by another person, ask its operator for:
+`config.json` contains private settings and, in remote mode, an agent token.
+Never publish it. The `.voxhf-local` folder holds notification credentials and
+subscriptions; keep it private as well.
 
-- the hosted app address, such as `https://app.example.com`;
-- the relay address, such as `wss://relay.example.com`;
-- a one-time registration code when registration is invite-only.
+## Install From Source
+
+Use this path for development or when a release ZIP is not available:
+
+```powershell
+git clone https://github.com/leledeste/voxhf.git
+cd voxhf
+npm.cmd ci
+npm.cmd run setup -- local
+npm.cmd start
+```
+
+Normal pilots should prefer the Local ZIP because it excludes server-only
+dependencies and tooling.
+
+## Connect To An Existing Server
+
+Local-only mode needs no account. Remote mode lets trusted browsers and phones
+reach the same local agent through an HTTPS/WSS server.
+
+Ask the server operator for:
+
+- the hosted app URL, such as `https://app.example.com`;
+- the relay URL, such as `wss://relay.example.com`;
+- a one-time registration invite when registration is invite-only.
 
 Then:
 
-1. Open the hosted app's `/register` page and create your own account.
-2. Save the agent token shown after registration. It is displayed only once
-   and is different from the server's admin or deployment tokens.
-3. In the extracted Local folder, run:
+1. Open the hosted app's `/register` page.
+2. Enter the invite, create the account, and save the **agent token** shown
+   once. It is not the account password or server admin token.
+3. In the extracted VoxHF Local folder, run:
 
    ```powershell
    npm.cmd run setup -- agent
    ```
 
-4. Enter the relay address, agent token, and a recognizable simulator-PC name.
-5. Restart VoxHF with `start.bat` and confirm that the console reports the
-   remote agent as connected.
-6. Sign in to the hosted app with the same account from each trusted browser or
-   phone. The local page remains available independently.
+4. Enter the relay URL, agent token, and a recognizable simulator-PC name.
+5. Restart VoxHF with `start.bat`.
+6. Confirm the console reports the remote agent connection.
+7. Sign in to the hosted app from each trusted device. The local
+   `http://localhost:3000` workspace remains available independently.
 
-The equivalent manual `config.json` settings are:
+The wizard updates these fields in the existing `config.json`:
 
 ```json
 {
@@ -80,150 +109,71 @@ The equivalent manual `config.json` settings are:
 }
 ```
 
-Update these fields inside the existing file rather than replacing the complete
-configuration. `remoteDeviceId` is the stable identifier for this simulator PC;
-keep it unchanged after pairing. `remoteDeviceName` is only the friendly label
-shown in the webapp.
+Keep `remoteDeviceId` stable after pairing. `remoteDeviceName` is only the
+friendly label shown in the app. The agent makes an outbound encrypted
+connection; it does not expose PilotUI, PilotCore, FSD, TS2, or the local
+webapp to the relay.
 
-The local agent makes an outbound encrypted WebSocket connection. It does not
-expose PilotUI, PilotCore, FSD, or TS2 proxy ports to the server or internet.
-Connecting to someone else's relay still means trusting that operator with the
-server-side account and live relayed traffic. To change servers, run the agent
-setup again with the new relay address and token.
+Connecting to a third-party server means trusting its operator with account
+data and live relayed traffic. Read that deployment's privacy notice before
+registering.
 
-## Notifications And Session History
+## First Functional Check
 
-Recent chat history is kept in the running local proxy and is restored after a
-browser refresh or reconnect. Every local or remote device connected to the
-same agent receives that shared current-session history. Recovery does not
-depend on notification permission and the history is cleared when the proxy
-process restarts.
+After local or remote installation:
 
-To enable notifications, open Settings > Notifications on each device. On
-iPhone and iPad, first add the hosted VoxHF app to the Home Screen, open that
-installed app, then enable notifications from Settings. The local proxy stores
-the browser push subscriptions and sends notifications for incoming private
-messages, incoming public messages that begin with the active callsign, and a
-confirmed IVAO connection that remains disconnected for ten seconds. The alert
-is suppressed only when recent telemetry shows the aircraft stationary at no
-more than five knots for two position updates. Missing or stale telemetry sends
-the alert as a safe fallback. Incoming SERVER welcome messages remain visible
-in chat but do not generate Push notifications during the first two seconds
-after connecting. Each subscribed device can independently enable an optional
-IVAO online confirmation.
+1. Tune a harmless COM value from VoxHF and confirm Altitude reflects it.
+2. Use **Settings > Audio > Test RX**.
+3. Send a private message to your own callsign from Altitude and confirm it
+   appears in VoxHF.
+4. Request `.metar` for a valid ICAO airport.
+5. Refresh the page and confirm the current proxy session's chat returns.
+6. If using remote mode, repeat the checks from a second trusted device.
 
-In remote mode, a subscribed device can also enable **PC / Proxy Offline
-Alert**. VoxHF first shows a confirmation explaining the privacy boundary. While
-an IVAO session is confirmed, the local proxy creates a short-lived, one-use
-Push request that is already encrypted and signed and places it in relay memory.
-If the agent connection disappears and does not recover during the relay grace
-period, the relay sends that request unchanged. Its notification reads `The
-local VoxHF proxy is no longer reachable.` The relay does not receive the local
-VAPID private key, persist the ticket, or include it in logs, audits, or
-backups. The ticket is removed after use, an agent reconnect with fresh state,
-an observed IVAO disconnect, opt-out, expiry, or relay restart.
-
-### Enable Notifications On iPhone Or iPad
-
-Requirements:
-
-- iOS or iPadOS 16.4 or newer.
-- The HTTPS hosted VoxHF app connected to the local agent through its relay.
-- VoxHF running on the Altitude PC with the active callsign detected.
-
-Enable one Apple device at a time:
-
-1. Open the hosted VoxHF app address in Safari and sign in.
-2. Tap **Share**, scroll down, and choose **Add to Home Screen**. If Apple shows
-   **Open as Web App**, keep it enabled, then tap **Add**.
-3. Leave Safari and launch VoxHF from the new Home Screen icon. Notification
-   permission cannot be enabled from a normal Safari tab.
-4. Wait until VoxHF shows the agent and callsign as online.
-5. Open **Settings > Notifications** inside VoxHF.
-6. Confirm that **Device Support** says `Supported` and **Proxy** says `Ready`.
-7. Tap **Enable on This Device**, then choose **Allow** in the iOS prompt.
-8. Confirm that **Permission** says `granted`, **This Device** says `Enabled`,
-   and **Saved Devices** is at least `1`.
-9. If this device should warn when the simulator PC disappears, enable **PC /
-   Proxy Offline Alert**, read the confirmation, and accept it. This option is
-   available only through remote relay mode and is off by default.
-10. Lock the screen and send a private message to the active callsign. A
-   self-addressed private message sent through Altitude is suitable for this
-   end-to-end check.
-
-If delivery is disabled or delayed:
-
-- Open the iOS **Settings** app, select **Notifications > VoxHF**, enable
-  **Allow Notifications**, and allow **Lock Screen** delivery.
-- Check whether a Focus mode or Scheduled Summary is delaying VoxHF.
-- If VoxHF says **Add to Home Screen first**, close the Safari tab and open the
-  Home Screen app.
-- If VoxHF says **Proxy Offline** or **Waiting for proxy**, restore the local
-  agent/relay connection before retrying.
-- If permission remains denied, change it in iOS Settings; the webapp cannot
-  override a system denial.
-
-Repeat the procedure on every iPhone or iPad that should receive alerts.
-Disabling notifications on one device does not disable chat recovery or the
-other subscribed devices.
-
-Enable **IVAO Online Confirmation** on a subscribed device if that device
-should show `IVAO online - CALLSIGN` after a confirmed connection. The option
-is stored by that browser and sent to the local proxy with its subscription;
-the relay does not retain the preference.
-
-Normal IVAO disconnect alerts are generated by the local proxy. If that proxy
-is still running but temporarily has no Internet, it retries the alert after
-connectivity returns while IVAO remains disconnected, for up to 30 minutes.
-The optional PC/proxy offline alert covers the different case where the relay
-loses the agent itself while the watchdog is armed. An observed FSD close
-disarms the relay ticket before the existing local disconnect policy runs, so a
-stationary manual IVAO logout remains silent and a moving IVAO disconnect keeps
-the existing local `IVAO disconnected` alert instead of producing two alerts.
-Closing the proxy, shutting down the PC, or losing its network path leaves the
-relay ticket armed; after heartbeat detection and the relay's default 30-second
-grace period, the relay can notify the opted-in device even though the proxy is
-gone.
-
-### Three-Minute UNICOM Reminder
-
-Use **Start 3:00** above the message filters when a three-minute position
-report interval begins. The control changes to **Cancel M:SS** and the local
-proxy owns the countdown, so it continues while the browser is refreshed,
-closed, or suspended by iOS. Every connected device shows the same remaining
-time. Starting it again after cancellation creates a new three-minute interval.
-
-At expiry, VoxHF adds an in-app system message and sends a Push alert to every
-device that already has notifications enabled. It does not compose or transmit
-an IVAO message automatically. The timer is memory-only for the current proxy
-session, so restarting or stopping the proxy clears it and prevents the expiry
-alert.
-
-Apple documents the underlying requirements in
-[Web Push for Web Apps on iOS and iPadOS](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/),
-[Add a website icon to the Home Screen](https://support.apple.com/guide/iphone/bookmark-a-website-iph42ab2f3a7/ios),
-and [Change notification settings](https://support.apple.com/guide/iphone/change-notification-settings-iph7c3d96bab/ios).
+See [User Guide > Notifications](USER_GUIDE.md#notifications) for notification
+triggers, iPhone/iPad installation, and the end-to-end Push test.
 
 ## Update
 
-Check and stage a published update:
+To check and stage a published Local update:
 
 ```powershell
 npm.cmd run update:check
 npm.cmd run update:stage
 ```
 
-The updater downloads release metadata over HTTPS, verifies the Local ZIP size
-and SHA-256, extracts it into a new sibling folder, and copies `config.json`
-plus the private `.voxhf-local` notification state. It intentionally does not
-overwrite a running installation. Stop VoxHF, start the staged folder, and keep
-the old folder until the new version has passed a flight-session test.
+The updater verifies release metadata, ZIP size, and SHA-256, then extracts a
+new sibling folder. It copies `config.json` and private notification state but
+does not overwrite the running installation.
 
-The staged source ZIP is checksum-verified but is not yet a signed Windows
-binary. Downloading the ZIP manually and following the same new-folder process
-remains supported.
+1. Stop the old proxy.
+2. Start `start.bat` from the staged folder.
+3. Repeat the functional check above.
+4. Keep the old folder until the new version has passed a real flight test.
 
-## Remove
+The release ZIP is checksum-verified but is not a signed Windows binary.
+Manual download and extraction into a new folder remains supported.
 
-Stop VoxHF and delete its extracted folder. VoxHF does not install a Windows
-service or expose the local PilotUI/PilotCore proxy ports to the internet.
+## Remove Or Reset
+
+To remove VoxHF, stop the proxy and delete its extracted folder. VoxHF does not
+install a Windows service.
+
+To reset only the configuration, stop VoxHF, move `config.json` somewhere safe,
+and start again. To remove notification credentials and subscriptions as well,
+also remove the private `.voxhf-local` folder. This is irreversible for those
+device subscriptions, so disable notifications in the app first when possible.
+
+## Installation Troubleshooting
+
+| Error | Resolution |
+| --- | --- |
+| `Node.js was not found` | Install Node.js, open a new terminal, and run `node --version`. |
+| `ffmpeg was not found in PATH` | Install ffmpeg, open a new terminal, and verify the Speex encoder/decoder commands. |
+| `npm ci` fails on first launch | Check internet access and the npm error; do not copy a partial `node_modules` from another version. |
+| Browser shows `Proxy unavailable` | Keep `start.bat` running and check whether another process uses port 3000. |
+| Altitude does not connect | Re-enter the exact IPv4 printed by VoxHF as PilotUI's Simulator Address. |
+| Remote agent is rejected | Recheck the relay URL and rotate/re-enter the personal agent token if necessary. |
+
+For application behavior after the connection succeeds, continue with the
+[User Guide troubleshooting table](USER_GUIDE.md#troubleshooting).

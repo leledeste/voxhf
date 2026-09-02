@@ -2,7 +2,7 @@
 
 Version: 0.1.2 Beta (`0.1.2-beta.1`)
 Status: public beta architecture
-Date: 2026-08-03
+Date: 2026-08-05
 
 ## Abstract
 
@@ -143,6 +143,9 @@ The UI provides:
   per-peer private chats.
 - Current-session chat recovery after local or remote browser reconnect.
 - Dot-command autocomplete.
+- Route departure/destination weather, requests, and interpretation.
+- A proxy-owned synchronized three-minute timer.
+- Per-device Web Push preferences and status.
 - Settings panels for audio, connection, remote access, notifications, and
   about.
 
@@ -233,6 +236,12 @@ PilotCore-facing operation. In remote mode, the browser sends a validated
 remote protocol message to the relay, and the local agent performs the same
 local operation after receiving that message.
 
+Incoming UNICOM text remains globally visible. Other incoming frequency chat
+is displayed only when its normalized FSD recipient matches COM1 or COM2. This
+is a browser presentation rule: private messages, outgoing messages,
+notifications, station discovery, and voice routing keep their independent
+paths.
+
 This means remote mode does not create a new raw command channel. It reuses the
 same local command functions behind a typed and validated protocol boundary.
 
@@ -315,10 +324,11 @@ Payload: 0x05 + 308 Speex bytes
 Packet interval: configured in config.json
 ```
 
-The agent derives the TS2 transmit-session seed from observed login and
-voice-session traffic, then refreshes it across channel and voice-server
-changes. A physical Altitude PTT press is no longer required, although this
-observed private protocol remains part of live regression testing.
+The agent normally derives the TS2 transmit-session seed from observed login
+and voice-session traffic, then refreshes it across channel and voice-server
+changes. If a usable session cannot be derived, one physical Altitude PTT press
+remains the explicit fallback. This observed private protocol remains part of
+live regression testing.
 
 Altitude can expose more than one local TS2 UDP source port during voice setup
 and keepalive traffic. VoxHF ignores unrelated packets from alternate ports and
@@ -467,10 +477,10 @@ The three-minute UNICOM reminder follows the same ownership boundary. The
 local agent holds its active interval in memory, publishes typed timer state to
 local and remote browsers, and originates the expiry Push. Remote browsers send
 only allowlisted `unicom.timer.start` and `unicom.timer.cancel` commands; the
-agent returns `unicom.timer.state` and `unicom.timer.expired`. The relay may
-cache the latest state for reconnection display, but it neither runs the timer
-nor stores Push subscriptions. Browser suspension therefore cannot stop the
-countdown, while a local-agent restart intentionally clears it.
+agent returns `unicom.timer.state` and `unicom.timer.expired`. The relay neither
+runs nor persists the timer and does not store Push subscriptions. Browser
+suspension therefore cannot stop the countdown, while a local-agent restart
+intentionally clears it.
 
 The optional agent-offline watchdog is a deliberately narrow exception to
 local Push origination. A subscribed remote browser must opt in per device and
@@ -497,159 +507,40 @@ uses the relay alert. A short-lived delivery receipt prevents the local retry
 path from duplicating an alert after connectivity returns, but only when at
 least one relay Push request was accepted successfully.
 
-## 11. Security Model
+## 11. Security And Privacy Invariants
 
-VoxHF uses defense in depth:
+The architecture depends on a small set of non-negotiable boundaries:
 
-- The local agent is not exposed publicly.
-- Remote access uses WSS through a relay.
-- The relay requires a token.
-- Browser origins are allowlisted.
-- Browser commands must be paired to a selected agent.
-- Remote messages are typed and validated.
-- The local agent applies an additional command rate limit before touching
-  PilotCore or FSD.
-- Audio is live-only and is never intentionally stored by the relay.
-- TX audio is accepted only inside a `tx.start` / `tx.stop` session window.
-- TX audio frames require the `CTX1` prefix.
-- The relay enforces frame size and maximum TX duration limits for live audio.
-- TX stops on disconnect, pairing revocation, device switch, or timeout.
+- privileged IVAO-facing ports remain local;
+- the relay accepts only authenticated, source-restricted typed messages;
+- the local agent validates every control again;
+- TX requires an explicit session and fails closed on any relevant disconnect;
+- voice is live-only and neither voice nor chat is stored in SQLite;
+- authentication secrets are hashed where persistence is required;
+- Push credentials and normal subscriptions remain on the local agent;
+- optional metadata/audit storage is separate and disabled by default.
 
-The relay is deliberately not designed as a raw tunnel. This reduces the risk
-that a browser can send arbitrary protocol bytes to IVAO-facing components.
+The complete implemented controls and residual trust are maintained in the
+[Security Policy](../SECURITY.md), [Threat Model](THREAT_MODEL.md), and
+[Privacy Architecture](PRIVACY.md) instead of being repeated here.
 
-## 12. Privacy Model
+## 12. Technology And Verification Boundaries
 
-VoxHF handles data that can be sensitive:
+VoxHF uses Node.js 20+, native TCP/UDP/HTTP/process APIs, `ws`, a dependency-free
+static webapp, browser Web Audio/`getUserMedia`, ffmpeg for Speex, SQLite for
+relay control-plane records, and Docker Compose/Caddy for production hosting.
+The exact dependency inventory is in `package.json` and
+[Third-Party Notices](THIRD_PARTY_NOTICES.md).
 
-- Callsign.
-- Chat messages.
-- Frequencies and station choices.
-- Position-derived station sorting.
-- Microphone audio.
-- Received voice audio.
-- Relay tokens and pairing codes.
+Automated tests cover syntax/configuration, protocol source/type validation,
+auth/account/admin/database behavior, browser state regressions, remote routing,
+binary RX/TX forwarding, notifications, the timer, the offline watchdog,
+backup/restore, updates, and release contents. Real PilotCore, FSD, TS2,
+controller notifications, browser media policies, and TX intelligibility still
+require live validation. Commands and the current matrix are in
+[Development](DEVELOPMENT.md) and [Release Testing](RELEASE_TESTING.md).
 
-Privacy choices in the current design:
-
-- The local proxy keeps bounded chat recovery history only in memory for the
-  current process and does not preserve it across full restarts.
-- Push credentials and enabled-device subscriptions are stored only in the
-  local `.voxhf-local` state. The optional offline watchdog exposes only a
-  short-lived sealed endpoint/request pair to relay memory; it is neither
-  persisted nor sufficient to create a different payload or a valid request
-  after its signature expires.
-- The relay does not store chat or audio.
-- Remote audio is live-only.
-- Logs avoid raw FSD/TS2 packets, audio payloads, complete tokens, and chat
-  contents.
-- Pairing codes are short-lived.
-- Registration codes are one-use, in-memory, and time-limited.
-- Browser pairings can be revoked.
-- Session IP/user-agent metadata and audit persistence are opt-in.
-
-The hosted service implements account and device records, account deletion,
-session revocation, optional audit retention, and public privacy/terms pages.
-Operators remain responsible for documenting any non-default retention choices
-and protecting their relay owner credentials.
-
-## 13. Technology Stack
-
-### Runtime
-
-- Node.js 20 or newer.
-- Native Node TCP, UDP, HTTP, and process APIs.
-- `ws` for WebSocket server/client support.
-
-### Audio
-
-- Browser `getUserMedia` for microphone capture.
-- Browser Web Audio API for RX playback and microphone processing.
-- ffmpeg for Speex decoding and encoding.
-- Ogg packet parsing in JavaScript to extract raw Speex encoder packets.
-
-### Webapp
-
-- Static HTML/CSS/JavaScript.
-- No frontend build step.
-- Local WebSocket for local mode.
-- Remote WSS connection through the authenticated relay.
-
-### Remote and Self-Hosting
-
-- Node.js relay service.
-- Docker Compose production stack.
-- Caddy reverse proxy for HTTPS/WSS and automatic certificates.
-- Environment-file based deployment configuration.
-
-### Verification
-
-- `npm run verify` for local project validation.
-- `npm run remote:test` for relay/agent/browser simulation.
-- GitHub Actions on Windows and Linux for basic CI.
-
-## 14. Verification Strategy
-
-The current automated checks cover syntax, configuration shape, protocol rules,
-privacy guardrails, and remote relay behavior.
-
-The remote integration simulation starts a real relay on a temporary localhost
-port and simulates:
-
-- Token and CORS checks.
-- Invalid token rejection.
-- Blocked origin rejection.
-- Agent connection.
-- Browser connection.
-- Pairing code flow.
-- Browser commands blocked before pairing.
-- Allowlisted command routing after pairing.
-- Agent update routing to the selected browser.
-- Session-history, notification, UNICOM timer, and watchdog routing boundaries.
-- Remote RX binary forwarding.
-- Remote TX binary forwarding.
-- Browser-side pairing renewal and revocation.
-
-Manual checks are still required for:
-
-- Real Altitude/PilotCore behavior.
-- Real IVAO FSD behavior.
-- Real TS2 voice behavior.
-- Web TX intelligibility with another listener.
-- Remote TX intelligibility over a public relay.
-
-## 15. Current Limitations
-
-- Web TX may have slight crackle compared with native Altitude TX.
-- IVAO does not echo the user's own TX audio.
-- Remote TX has successful live IVAO validation, but still needs broader
-  regression coverage across more networks and listeners.
-- Hosted account and administration surfaces are public-beta software and still
-  need broader production review.
-- Pairings use SQLite in account mode and JSON persistence in simple env mode.
-- The hosted account service is still beta software and requires continued
-  operational monitoring and independent security review before wider use.
-- The responsive mobile interface works, but mobile ergonomics and iOS audio
-  routing still need refinement.
-- The local proxy should not be exposed directly to the public internet.
-- ffmpeg must currently be installed and available to the Node process.
-
-## 16. Future Engineering Direction
-
-Important future work includes:
-
-- Further mobile ergonomics and iOS audio-route refinements.
-- Clearer paired-browser management and revocation UI.
-- Broader audit logging for login/session events, authorization failures,
-  abnormal closes, and production command authorization.
-- Better first-run setup flow for Altitude.
-- More complete audio diagnostics.
-- Keeping the local proxy and relay modules small as remote access, account handling,
-  and audio validation evolve.
-- Revisiting remote audio compression if bandwidth or relay scale requires it.
-- Expanding integration tests around startup, reconnect, and standby recovery.
-
-## 17. Conclusion
+## 13. Conclusion
 
 VoxHF is a local-first bridge that turns Altitude traffic into a browser
 control surface without replacing Altitude. Its main engineering constraint is
@@ -658,7 +549,6 @@ extends that model by adding a relay that forwards typed, validated,
 paired messages and live audio frames without exposing local simulator or IVAO
 ports directly to the internet.
 
-The result is a practical beta architecture: local and remote control,
-RX, TX, account access, and self-hosting work today. The remaining work is
-mostly about hardening, broader live validation, mobile refinement, and release
-ergonomics.
+The result is a practical beta architecture: local and remote control, RX, TX,
+account access, and self-hosting work today. Current limitations and future
+product decisions are maintained in the [Roadmap](ROADMAP.md).

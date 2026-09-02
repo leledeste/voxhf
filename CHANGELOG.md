@@ -4,6 +4,24 @@ All notable VoxHF changes are recorded here.
 
 ## Unreleased
 
+## 0.1.2-beta.2 - 2026-09-02
+
+### Changed
+
+- Reorganized the documentation into a concise project overview, a complete
+  pilot user guide, a focused Local installation guide, and a step-by-step VPS
+  server/operator guide; removed repeated and historical descriptions and
+  corrected the dependency policy for the project's AGPL-3.0-only license.
+
+### Fixed
+
+- Filtered incoming frequency chat so UNICOM remains visible while other
+  traffic appears only when its frequency matches the current COM1 or COM2.
+- Interpreted unavailable METAR and TAF visibility (`////`) and cloud
+  (`//////`) groups explicitly, kept `RMK` content together in a dedicated
+  Remarks field, and decoded runway-ceilometer `NCD` remarks without losing
+  unknown supplementary text.
+
 ## 0.1.2-beta.1 - 2026-08-03
 
 ### Added

@@ -1,154 +1,103 @@
 # Security Policy
 
-## Scope
-
-This document covers the VoxHF local agent, webapp, relay, and self-hosting configuration.
-
-VoxHF is experimental software. It interacts with IVAO Altitude traffic and browser microphone access, so remote access must be designed defensively.
+This policy covers the VoxHF local agent, webapp, relay, account/admin services,
+release packages, and self-hosting configuration.
 
 ## Supported Versions
 
-The project is pre-1.0. Security fixes target the latest public version unless a stable branch exists.
+VoxHF is pre-1.0. Security fixes target the latest public release.
 
 | Version | Supported |
-|---|---|
-| 0.1.x | Yes |
-| Older versions | No |
+| --- | --- |
+| Latest `0.1.x` release | Yes |
+| Older releases | No |
 
-## Reporting Vulnerabilities
+## Report A Vulnerability
 
-Please do not publicly disclose a suspected vulnerability before maintainers have had a reasonable chance to investigate.
+Do not open a public issue for a suspected vulnerability. Use a private GitHub
+security advisory when available, or contact the maintainer privately first.
 
-Recommended report contents:
+Include:
 
-- Affected component: agent, webapp, relay, docs, packaging, or infrastructure.
-- Version or commit.
-- Steps to reproduce.
-- Expected impact.
-- Whether credentials, tokens, audio, or personal data may be exposed.
+- affected component and version/commit;
+- reproducible steps or a proof of concept;
+- expected impact;
+- whether tokens, cookies, credentials, audio, messages, position, or personal
+  data may be exposed;
+- any immediate containment already performed.
 
-Use a private GitHub security advisory if available for the repository. If that
-is not available, contact the maintainer privately before opening a public
-issue.
+Do not include live user secrets or unnecessary personal data in the report.
 
-## Core Security Principles
+## Secure Deployment Baseline
 
-- The local agent must never be exposed directly to the public internet.
-- Remote access must go through authenticated HTTPS/WSS relay connections.
-- Remote mode must accept only typed, allowlisted commands.
-- Raw FSD, TS2, or PilotCore command tunneling must not be exposed remotely.
-- Every WebSocket connection must be authenticated.
-- Every remote action must be authorized for the selected user and device.
-- The local agent must still rate-limit remote commands after relay authorization.
-- Pairing codes must be short-lived and single-use.
-- Device tokens must be revocable.
-- Preview pairing persistence must avoid storing raw browser ids where practical.
-- Logs must not contain secrets, voice audio, raw traffic, chat contents, or complete tokens.
+- Keep local ports `4827`, `6809`, `8767`, and `3000` private. Never port-forward
+  them or bind them to a public interface for remote access.
+- Use an authenticated HTTPS/WSS relay for remote browsers.
+- Restrict `VOXHF_ALLOWED_ORIGINS` to exact trusted HTTPS origins.
+- Use unique generated relay, agent, and admin secrets; never reuse them.
+- Keep `.env`, `config.json`, `.voxhf-local`, SQLite databases, cookies, logs,
+  and backups private.
+- Keep invite-only registration enabled unless open registration is a deliberate
+  and reviewed operating decision.
+- Disable legacy agent query-token compatibility after all agents use
+  `Authorization` header authentication.
+- Patch the OS, Docker, Node.js, npm dependencies, ffmpeg, and browsers.
+- Test backup restoration and account/admin recovery before inviting users.
+- Publish deployment-specific Terms and Privacy documents.
 
-## Remote Security Controls
+The complete server checklist and commands are in
+[Self-Hosting](docs/SELF_HOSTING.md#security-checklist-before-inviting-users).
 
-### Transport
+## Implemented Trust Boundaries
 
-- HTTPS/WSS only in production.
-- Secure reverse proxy defaults.
-- No mixed-content remote mode.
+- The local agent is the source of truth and validates actions again before
+  touching PilotCore, FSD, TS2, radio, XPDR, or TX state.
+- Remote traffic uses a versioned typed protocol with source restrictions,
+  allowlisted message types, size limits, and validation at both relay and
+  agent boundaries. No raw FSD, TS2, or PilotCore tunnel is exposed.
+- Browser WebSockets require an allowed `Origin`; agents authenticate separately.
+- Account and admin identities/sessions are separate. Browser sessions use
+  opaque HttpOnly, Secure, SameSite cookies; stored secrets are hashed.
+- Pairing and invite codes are memory-only, expiring, rate-limited, and one-use.
+- TX requires an explicit browser action and stops on browser, relay, agent,
+  pairing, selected-device, or timeout failure.
+- ffmpeg is started without a shell, receives fixed argument arrays, and handles
+  streamed data rather than peer-selected file paths.
+- Audio is live-only and never stored in SQLite.
+- The optional agent-offline watchdog accepts only short-lived sealed Push
+  requests created by the authenticated local agent and keeps them in relay
+  memory only.
 
-### WebSocket Handshake
+Detailed protocol and failure behavior is in the
+[Technical Paper](docs/TECHNICAL_PAPER.md); threats and residual trust are in
+the [Threat Model](docs/THREAT_MODEL.md).
 
-- Validate `Origin` against an explicit allowlist.
-- Reject browser WebSocket handshakes that omit `Origin`; non-browser agent
-  clients may omit it, but browser clients should not.
-- Authenticate browser and agent connections.
-- Reject unknown protocol versions.
-- Disable compression unless it is explicitly needed and reviewed.
+## Logging And Stored Security Data
 
-### Message Validation
+Logs and audit events may record bounded event types, identifiers, timestamps,
+outcomes, and delivery counts. They must not contain passwords, full tokens,
+cookies, pairing/invite/recovery codes, Push endpoints, authorization headers,
+chat text, voice audio, or raw FSD/TS2 payloads.
 
-- Validate message shape, size, and type.
-- Reject unknown message types.
-- Enforce per-message authorization.
-- Rate-limit high-risk actions such as chat send, tuning, pairing, and TX.
-- Enforce a second small agent-side rate limit before touching PilotCore or FSD.
-- Close connections that repeatedly send malformed messages.
+Persistent audit data and session IP/user-agent metadata are disabled by
+default and are separate operator choices. See
+[Privacy Architecture](docs/PRIVACY.md).
 
-### Authentication
+## Dependency And Release Security
 
-Preferred options:
+Run before publication:
 
-- Passkeys/WebAuthn for the web account.
-- OAuth with MFA as a fallback.
-- Short-lived access tokens.
-- Refresh-token rotation.
-- Hashed device tokens.
+```powershell
+npm.cmd audit
+npm.cmd run verify
+npm.cmd run release:prepare
+npm.cmd run release:verify
+```
 
-Relay owner accounts can opt into WebAuthn/passkey MFA from the admin Security
-page. Enrollment is never forced. The relay stores public credential material,
-counters, and hashed one-use recovery codes; biometric verification remains on
-the user's device. Keep the separate admin token available as a break-glass
-credential because recovery intentionally revokes sessions and clears MFA.
+Release packages use locked dependencies and SHA-256 manifests, but the Local
+ZIP is not yet a signed Windows binary. Dependency and license decisions are in
+[Dependency Policy](docs/DEPENDENCY_POLICY.md).
 
-### Pairing
-
-- Pairing code or QR generated locally by the agent.
-- Short expiry, ideally 60-120 seconds.
-- One-time use.
-- Device name shown before confirmation.
-- Existing devices visible and revocable from the account.
-- Preview relay persistence stores hashed browser ids and agent ids only.
-
-### TX Safety
-
-- Require explicit user gesture to start PTT.
-- Maximum PTT duration.
-- Stop TX on browser disconnect.
-- Stop TX on agent disconnect.
-- Local agent kill switch.
-- Visible local indication when remote TX is active.
-
-### Audio Parsing
-
-- Treat TS2 voice and browser microphone streams as untrusted parser input.
-- Invoke ffmpeg with fixed argument arrays, not shell-built commands.
-- Stream audio through stdin/stdout and avoid peer-controlled file paths.
-- Keep codec options validated and limited.
-- Keep remote audio relay forwarding live-only: no caching, replay, or logging.
-- Accept browser-to-agent Remote TX binary audio only during an explicit `tx.start` / `tx.stop` window, with pairing authorization, selected-agent checks, `CTX1` frame prefixing, frame/byte limits, timeout, and stop-on-disconnect handling.
-
-## Logging
-
-Security logs should include:
-
-- Login success/failure.
-- Pairing success/failure.
-- Device connected/disconnected.
-- Authorization failures.
-- Rate-limit events.
-- Abnormal WebSocket closes.
-
-Security logs should not include:
-
-- Passwords.
-- Access or refresh tokens.
-- Pairing codes after creation.
-- Chat message contents.
-- Voice/audio payloads.
-- Raw FSD or TS2 packets.
-
-## Dependency Security
-
-Recommended GitHub settings:
-
-- Dependabot alerts and updates.
-- Secret scanning.
-- CodeQL or equivalent static analysis.
-- Required CI checks before release.
-
-## Threat Model
-
-See [Threat Model](docs/THREAT_MODEL.md).
-
-The current internal review baseline is recorded in
-[Security Audit](docs/SECURITY_AUDIT.md). It does not replace independent review.
-
-
-The implemented local and remote boundaries are described in the [Technical Paper](docs/TECHNICAL_PAPER.md).
+The dated internal baseline is recorded in
+[Security Audit](docs/SECURITY_AUDIT.md). It does not replace independent
+security review.

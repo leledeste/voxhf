@@ -20,12 +20,16 @@ repository and do not copy `node_modules` from the development PC.
 1. Download `voxhf-local-<version>.zip` and `SHA256SUMS.txt`.
 2. Compare `Get-FileHash .\voxhf-local-<version>.zip -Algorithm SHA256` with
    the published checksum.
-3. Follow only `docs/INSTALL_LOCAL.md` from the extracted package.
+3. Follow only `docs/INSTALL_LOCAL.md` and `docs/USER_GUIDE.md` from the
+   extracted package.
 4. Record whether Node.js, ffmpeg, setup, and startup instructions are enough
    without additional knowledge.
 5. Connect Altitude and verify initial COM/XPDR state.
 6. Verify COM1/COM2 tuning, station dropdowns, private and frequency messages,
-   commands, route weather, RX, and TX.
+   commands, route weather, RX, and TX. Confirm that UNICOM chat remains
+   visible, traffic for both tuned COM frequencies is visible, and incoming
+   traffic for a third untuned frequency is hidden from **All** and
+   **Frequency**.
 7. While several nearby controllers are advertised, including controllers on
    different regional TS2 servers when available, join and change voice
    channels. Confirm that voice remains connected and **Web TX ready** does not

@@ -88,10 +88,53 @@
     return `From day ${match[1]} at ${match[2]}:${match[3]}Z`;
   }
 
+  function appendUnavailableConditionRow(token, rows, context = '') {
+    // Some international reports replace an unavailable visibility or cloud
+    // group with solidi. Keep the missing value explicit instead of treating
+    // the placeholder as an unknown weather code.
+    const unavailable = token === '////'
+      ? {
+          label: 'Visibility',
+          value: 'Not available',
+          hint: 'The visibility field contains solidi because no usable value was reported.',
+        }
+      : token === '//////'
+        ? {
+            label: 'Cloud',
+            value: 'Not available',
+            hint: 'The cloud field contains solidi because no usable cloud amount or base was reported.',
+          }
+        : null;
+    if (!unavailable) return false;
+    rows.push({
+      ...unavailable,
+      label: `${context}${unavailable.label}`.trim(),
+    });
+    return true;
+  }
+
+  function appendRemarks(tokens, rows, context = '') {
+    const original = tokens.join(' ').trim();
+    if (!original) return;
+
+    const ceilometer = /^CLD FROM CEILOMETER RWY (\d{2}[LCR]?) NCD$/.exec(original);
+    rows.push({
+      label: `${context}Remarks`.trim(),
+      value: ceilometer
+        ? `Runway ${ceilometer[1]} ceilometer: no cloud detected`
+        : original,
+      hint: ceilometer
+        ? `Decoded from the original remark: ${original}`
+        : 'Supplementary station remarks are preserved in their original form.',
+    });
+  }
+
   function appendConditionTokenRows(token, rows, unparsed, context = '') {
     // Forecast and METAR body groups share many codes. This helper keeps TAF
     // sections readable without pretending to solve every possible group.
     if (!token || token === 'AUTO' || token === 'COR') return true;
+
+    if (appendUnavailableConditionRow(token, rows, context)) return true;
 
     if (token === 'CAVOK') {
       rows.push({
@@ -237,6 +280,13 @@
     for (; index < tokens.length; index += 1) {
       const token = tokens[index].toUpperCase();
       if (!token || token === 'AUTO' || token === 'COR') continue;
+
+      if (token === 'RMK') {
+        appendRemarks(tokens.slice(index + 1).map(value => value.toUpperCase()), rows);
+        break;
+      }
+
+      if (appendUnavailableConditionRow(token, rows)) continue;
 
       if (token === 'CAVOK') {
         rows.push({
@@ -432,6 +482,16 @@
 
     for (; index < tokens.length; index += 1) {
       const token = tokens[index].toUpperCase();
+
+      if (token === 'RMK') {
+        appendRemarks(
+          tokens.slice(index + 1).map(value => value.toUpperCase()),
+          rows,
+          `${section} `,
+        );
+        break;
+      }
+
       const fm = fromTime(token);
       if (fm) {
         section = fm;

@@ -1,493 +1,526 @@
-# Self-Hosting VoxHF
+# Self-Host VoxHF On A VPS
 
-VoxHF can serve its webapp and relay from one VPS. The local agent stays on the
-Altitude PC and creates an outbound WSS connection. Never expose the local
-PilotUI/PilotCore, FSD, TS2, or webapp ports to the internet.
+This guide starts with a fresh Ubuntu VPS and ends with a working landing site,
+operational webapp, authenticated relay, admin account, pilot account, backup,
+and connected Local agent.
+
+The VPS never connects to IVAO. The local agent remains on the Altitude PC and
+opens an outbound WSS connection to the relay.
 
 ```text
-Browser / phone
-      |
-      | HTTPS + WSS
-      v
-Caddy on VPS
-  +-- static VoxHF webapp
-  +-- VoxHF relay
-      ^
-      | outbound WSS
-      |
-VoxHF agent on Altitude PC
+Browser or phone
+       |
+       | HTTPS + WSS (ports 443/80)
+       v
+Caddy on the VPS
+  +-- landing site
+  +-- operational webapp
+  +-- authenticated relay
+       ^
+       | outbound WSS
+       |
+Local VoxHF agent on the Altitude PC
 ```
 
-## Requirements
+Never expose local ports `4827`, `6809`, `8767`, or `3000` to the internet.
 
-- One VPS with a public IPv4 or IPv6 address.
-- Docker Engine and Docker Compose.
-- A base domain plus `app` and `relay` names, for example `example.com`,
-  `app.example.com`, and `relay.example.com`.
-- DNS records pointing all three names to the VPS.
-- TCP ports `80` and `443` open.
-- A separate email address for Caddy certificate notices.
-- A current VoxHF checkout.
+## 1. Decide The Deployment Names
 
-One VPS is enough for a private or small community deployment.
+You need one domain and three DNS names. This guide uses:
 
-## Install Docker
+| Purpose | Example |
+| --- | --- |
+| Public landing site | `example.com` |
+| Operational app | `app.example.com` |
+| Relay and admin API | `relay.example.com` |
 
-On Ubuntu/Debian, install Docker from the official Docker repository or your
-distribution packages. A typical distribution-package installation is:
+You also need:
+
+- an Ubuntu 22.04, 24.04, or 26.04 64-bit VPS with a public IP;
+- root or `sudo` access;
+- TCP ports 80 and 443 reachable;
+- an email address for TLS certificate notices;
+- enough space for Docker images, the SQLite volume, logs, and backups.
+
+One small VPS is sufficient for a private or small-community deployment.
+
+VoxHF supports two access models:
+
+| Model | Use it for | Authentication |
+| --- | --- | --- |
+| Accounts | Multiple pilots or normal hosted use | Invite-only accounts, personal agent tokens, and browser sessions |
+| Private token | One owner or a short private test | One shared relay token plus browser pairing |
+
+Use **Accounts** unless the relay is strictly personal and temporary.
+
+## 2. Create DNS Records
+
+At the DNS provider, create `A` records for the base, `app`, and `relay` names
+pointing to the VPS IPv4 address. Create matching `AAAA` records only if IPv6 is
+configured and reachable on the VPS.
+
+Example:
+
+```text
+example.com        A      203.0.113.10
+app.example.com    A      203.0.113.10
+relay.example.com  A      203.0.113.10
+```
+
+Wait until each name resolves to the VPS before starting Caddy:
 
 ```bash
-apt update
-apt install -y docker.io docker-compose-v2 git curl ufw
-systemctl enable --now docker
+getent hosts example.com
+getent hosts app.example.com
+getent hosts relay.example.com
 ```
 
-Some releases name the Compose package `docker-compose-plugin`; use Docker's
-official repository when neither package is available. Confirm:
+Caddy obtains public TLS certificates automatically, so incorrect or
+unpropagated DNS is the most common first-start failure.
+
+## 3. Update The VPS And Configure The Firewall
+
+Connect over SSH, then update the operating system:
 
 ```bash
-docker --version
-docker compose version
+sudo apt update
+sudo apt full-upgrade -y
+sudo apt install -y ca-certificates curl git ufw
 ```
 
-If `docker compose` is unavailable, install the Docker Compose plugin before
-continuing. The old `docker-compose` command is not used by this project.
-
-Allow the real SSH port before enabling the firewall, then expose only HTTP and
-HTTPS for VoxHF:
+Allow the real SSH port before enabling UFW. If it is the default port:
 
 ```bash
-ufw allow OpenSSH
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw enable
-ufw status
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+sudo ufw status
 ```
 
-## Prepare VoxHF
+If SSH uses another port, allow that exact port instead of `OpenSSH`. The VoxHF
+Compose file publishes only 80 and 443; the relay's internal port 8787 is not
+published. Docker documents additional firewall behavior in
+[Packet filtering and firewalls](https://docs.docker.com/engine/network/packet-filtering-firewalls/).
+
+Reboot when the OS reports that one is required, then reconnect:
+
+```bash
+sudo reboot
+```
+
+## 4. Install Docker Engine And Compose
+
+Use Docker's official Ubuntu repository. Remove conflicting distribution
+packages first; this does not delete existing `/var/lib/docker` data:
+
+```bash
+sudo apt remove -y docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+```
+
+Add the repository:
+
+```bash
+sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+```
+
+Install and verify Docker:
+
+```bash
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+sudo docker run --rm hello-world
+sudo docker compose version
+```
+
+These steps follow Docker's current
+[Ubuntu installation guide](https://docs.docker.com/engine/install/ubuntu/).
+Commands below omit `sudo` when run as root; otherwise prefix Docker and the
+operator script with `sudo` as appropriate.
+
+## 5. Download VoxHF
+
+The recommended server installation is a Git checkout because the managed
+update and rollback commands use Git history:
 
 ```bash
 cd /opt
-git clone https://github.com/leledeste/voxhf.git
+sudo git clone https://github.com/leledeste/voxhf.git
+sudo chown -R "$(id -u):$(id -g)" /opt/voxhf
 cd /opt/voxhf
 chmod +x infra/docker/voxhf-server.sh
+```
+
+For a fixed release, check out its tag before configuration:
+
+```bash
+git fetch --tags
+git checkout v0.1.2-beta.1
+```
+
+To receive normal fast-forward updates, remain on the `main` branch instead.
+The published `voxhf-server-<version>.zip` contains the same server components,
+but ZIP deployments cannot use the Git-based `update` and `rollback` commands;
+replace them with a new extracted Server package and take an off-server backup
+before every manual upgrade.
+
+## 6. Generate The Private Server Configuration
+
+Run the interactive wizard:
+
+```bash
+cd /opt/voxhf
 infra/docker/voxhf-server.sh setup
 ```
 
-The wizard asks for one base domain and derives the landing, app, and relay
-hosts. It also validates the certificate email, generates cryptographic tokens,
-uses the versioned privacy-first defaults, and creates the Git-ignored
-`infra/docker/.env` with owner-only file permissions.
+Enter:
 
-Choose one access model:
+1. the base domain without `https://`, for example `example.com`;
+2. the certificate email address;
+3. **Accounts** or **Private token**.
 
-| Model | Best for | Authentication |
-| --- | --- | --- |
-| Private token | One owner, quickest setup | One generated token plus browser pairing. |
-| Accounts | Families or small communities | SQLite accounts and invite-only registration. |
+The wizard derives the `app` and `relay` names, validates the inputs, generates
+independent cryptographic secrets, and writes `infra/docker/.env` with private
+permissions. It does not modify DNS, firewall rules, or start the services.
 
-The wizard prints generated secrets once. Store them in a password manager.
-It does not change DNS, firewall rules, or start Docker.
+Store the token printed by the wizard in a password manager:
 
-If Node.js 20+ is already installed directly on the VPS, the shorter equivalent
-is `npm run setup -- server`.
+- account mode prints the admin bootstrap/break-glass token;
+- private-token mode prints the shared relay token.
 
-## Manual Configuration
+Do not put `.env`, tokens, databases, or backups in Git.
 
-Skip this section when you used `npm run setup -- server`. For an unattended or
-custom deployment, copy the private template and edit it directly:
+### Configuration Files
 
-```bash
-cp infra/docker/.env.example infra/docker/.env
-chmod 600 infra/docker/.env
-```
+Docker loads two environment files:
 
-Generate independent relay and admin tokens when the selected mode needs them:
+- `infra/docker/defaults.env`: tracked safe defaults, updated with the source;
+- `infra/docker/.env`: private domains, secrets, and deliberate overrides,
+  loaded last.
 
-```bash
-openssl rand -hex 32
-openssl rand -hex 32
-```
+Do not copy every default into `.env`. Add a value there only when it is secret
+or intentionally overrides the standard behavior. For unattended setup, copy
+`infra/docker/.env.example` to `.env`, replace every placeholder, and set mode
+values manually.
 
-Important account-mode values:
+## 7. Provide Deployment-Specific Legal Pages
 
-```env
-LANDING_DOMAIN=example.com
-WEBAPP_DOMAIN=app.example.com
-RELAY_DOMAIN=relay.example.com
-CADDY_ACME_EMAIL=you@example.com
-
-VOXHF_ALLOWED_ORIGINS=https://app.example.com,https://relay.example.com
-VOXHF_RELAY_TOKEN=
-VOXHF_RELAY_ADMIN_TOKEN=replace-with-admin-hex-token
-
-VOXHF_RELAY_AUTH_MODE=sqlite
-VOXHF_RELAY_ENABLE_REGISTRATION=true
-```
-
-Account mode creates a separate personal agent token for every registered user,
-so it does not need `VOXHF_RELAY_TOKEN`. In private-token mode use
-`VOXHF_RELAY_AUTH_MODE=env`, keep registration off, and configure
-`VOXHF_RELAY_TOKEN`. Never reuse the relay token as the admin token.
-
-Docker loads configuration from two files:
-
-- `infra/docker/defaults.env` contains safe operational defaults. It is tracked
-  by Git and updates automatically with `git pull`.
-- `infra/docker/.env` contains domains, origins, tokens, and deployment choices.
-  It is private, ignored by Git, and loaded last so its values override the
-  tracked defaults.
-
-You do not need to copy new default keys into `.env` after an update. Add a key
-from `defaults.env` to `.env` only when deliberately overriding it. Existing
-deployments may keep old overrides in `.env`; no migration is required.
-
-## Start
+Do this before allowing other people to register. The repository contains
+neutral templates, not a privacy policy or terms written for your hosted
+service.
 
 ```bash
 cd /opt/voxhf
-chmod +x infra/docker/voxhf-server.sh
-infra/docker/voxhf-server.sh doctor
-infra/docker/voxhf-server.sh start
-```
-
-The operator script runs the same Compose deployment, waits for the HTTPS relay
-health endpoint, and keeps every path consistent. Direct Compose commands remain
-available for troubleshooting:
-
-```bash
-docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env ps
-docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env logs --tail=100
-```
-
-Check endpoints:
-
-```text
-https://app.example.com
-https://relay.example.com/health
-https://relay.example.com/admin
-```
-
-The base domain serves the public landing page. The app domain serves the
-operational interface, with `/login` and `/register` for account mode. The local
-proxy maps its own root directly to the operational interface.
-
-Health should report `ok: true` and service `voxhf-relay`.
-
-## Authentication Modes
-
-| Mode | Source | Recommended Use |
-| --- | --- | --- |
-| `env` | `VOXHF_RELAY_TOKEN` and `VOXHF_RELAY_USERS` | First private test or one owner. |
-| `sqlite-fallback` | SQLite plus env tokens | Verify database auth without locking out the agent. |
-| `sqlite` | Active SQLite agent tokens only | Stable multi-user deployment. |
-
-For a manually migrated deployment:
-
-1. Start with `sqlite-fallback` only when migrating existing env tokens.
-2. Register the first account or create a SQLite user.
-3. Confirm its agent token works from the Altitude PC.
-4. Switch to `sqlite`.
-5. Remove unused env user tokens and restart.
-
-New account-mode installations can start directly in `sqlite`; the admin token
-creates the first owner account and the owner then creates registration invites.
-SQLite is optional for a simple private relay, but required for accounts and
-the admin panel.
-
-## Deployment-Specific Legal Pages
-
-The public packages contain neutral Terms and Privacy templates, not the VoxHF
-project operator's hosted-service documents. Before enabling registration for
-other people, copy and edit both templates:
-
-```bash
 mkdir -p infra/docker/private/legal
 cp webapp/privacy.html infra/docker/private/legal/privacy.html
 cp webapp/terms.html infra/docker/private/legal/terms.html
 ```
 
-Identify the actual server operator, contact, providers, data handling,
-retention and terms that apply to the deployment. Then add these private
-overrides to `infra/docker/.env`:
+Edit both copies to identify the operator, contact method, hosting providers,
+data processing, retention, user rights, and applicable terms. Then add:
 
 ```env
 VOXHF_LEGAL_PRIVACY_FILE=./private/legal/privacy.html
 VOXHF_LEGAL_TERMS_FILE=./private/legal/terms.html
 VOXHF_LEGAL_TERMS_VERSION=1.0
 VOXHF_LEGAL_PRIVACY_VERSION=1.0
-VOXHF_LEGAL_EFFECTIVE_DATE=2026-07-15
+VOXHF_LEGAL_EFFECTIVE_DATE=2026-08-05
 ```
 
-The `infra/docker/private/` directory is ignored by Git, excluded from Docker
-build context and rejected by the release packager. Back it up separately.
-Increment the corresponding version whenever users must accept a materially
-updated document.
+Increment the relevant version when users must accept a material change. The
+private directory is ignored by Git and excluded from release packages; back
+it up separately.
 
-## Self-Hosted Accounts
+## 8. Validate And Start The Server
 
-With:
-
-```env
-VOXHF_RELAY_AUTH_MODE=sqlite
-VOXHF_RELAY_ENABLE_REGISTRATION=true
-VOXHF_RELAY_REQUIRE_REGISTRATION_INVITE=true
+```bash
+cd /opt/voxhf
+infra/docker/voxhf-server.sh doctor
+infra/docker/voxhf-server.sh start
 ```
 
-the self-hosted webapp shows Login/Register, but registration needs a one-time
-code.
+`doctor` checks Docker, Compose, `.env`, placeholders, and Compose syntax. If
+the relay is already running it also checks HTTPS health. `start` builds both
+services, starts them, displays container state, and waits for relay health.
 
-1. Open `/admin` and create the owner account with `VOXHF_RELAY_ADMIN_TOKEN`.
-2. Open Access and choose `Create Invite`.
-3. Privately share the code; it is held only in memory, expires, and works once.
-4. Register the account with that code.
-5. Save the one-time agent token.
-6. Put it in the local agent `config.json` and restart the agent.
-7. Log in from trusted browsers.
+Open:
 
-Tokens are stored hashed and cannot be recovered. If one is lost, rotate it
-from the admin panel and replace it in `config.json`.
+```text
+https://example.com
+https://app.example.com
+https://relay.example.com/health
+https://relay.example.com/admin
+```
 
-The local Node agent now sends this token through the WebSocket upgrade
-`Authorization` header. During the transition, older agents can be accepted
-with `VOXHF_RELAY_ALLOW_AGENT_QUERY_TOKEN=true`. Set it to `false` after all
-Altitude PCs using the relay have been updated.
+The health response must include `"ok": true` and service `voxhf-relay`.
+Inspect failures with:
 
-Pilots can manage active browser sessions and change their password from the
-webapp Remote settings. For a forgotten password, the owner selects **Reset
-password** beside the user in `/admin` and shares the code privately. The code
-is shown once, expires after 30 minutes by default, and is consumed by the
-**Recover** tab on the login page. Recovery revokes older browser sessions but
-does not rotate the agent token.
+```bash
+infra/docker/voxhf-server.sh logs
+```
 
-Set `VOXHF_RELAY_REQUIRE_REGISTRATION_INVITE=false` only when deliberately
-operating an open-registration relay.
+Direct Compose inspection is also available:
 
-## Admin Panel
+```bash
+docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env ps
+docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env logs --tail=100
+```
 
-Open `https://relay.example.com/admin`. On a new installation, use
-`VOXHF_RELAY_ADMIN_TOKEN` once to create the owner account. Sign in with the
-owner username and password after that.
+## 9. Create The Owner And First Pilot (Account Mode)
 
-The panel can:
+The wizard configures SQLite authentication, invite-only registration, and a
+separate admin token.
 
-- create, disable, enable, and delete users;
-- rotate or revoke agent tokens;
-- list agents and browser pairings;
-- revoke pairings;
-- inspect recent audit events.
-- generate one-time registration invites.
-- change the owner password;
-- list and revoke admin sessions.
-- optionally protect owner login with passkeys and one-use recovery codes.
+1. Open `https://relay.example.com/admin`.
+2. Use the admin token once to create the owner username and password.
+3. Sign in as that owner for normal administration.
+4. Open **Access** and create a one-time registration invite.
+5. Privately send the invite to the pilot.
+6. Open `https://app.example.com/register` and create the pilot account.
+7. Save the personal agent token shown once after registration.
 
-Passkey MFA is opt-in. Open **Security**, enter the current owner password, and
-add a passkey. Save the recovery codes shown once. The passkey is bound to the
-relay admin hostname, so configure the final domain before enrollment. By
-default the RP ID is derived from that hostname; an installation that needs an
-explicit value can set `VOXHF_RELAY_WEBAUTHN_RP_ID=relay.example.com`.
+Tokens and recovery codes are stored as hashes and cannot be displayed again.
+The owner can rotate/revoke an agent token, disable/enable/delete a user,
+revoke pairings and sessions, create password-recovery codes, and inspect audit
+events when persistence is enabled.
 
-Removing the last passkey disables MFA and leaves password login active. The
-break-glass admin token also clears MFA during owner recovery. VoxHF stores the
-credential public key and usage counter, never Face ID, Touch ID, Windows Hello,
-or other biometric data.
+The admin token is only for bootstrap and break-glass recovery. Daily admin
+access uses an HttpOnly session cookie. Keep the token offline in a password
+manager.
 
-After deployment, run the automated MFA preflight and then the real-device
-matrix in [MFA Testing](MFA_TESTING.md):
+### Optional Admin Passkey MFA
+
+Open **Admin > Security**, verify the owner password, and add a passkey. Save
+the one-use recovery codes shown once. Passkeys are bound to the relay hostname,
+so configure the final domain before enrollment.
+
+Removing the last passkey disables MFA. Break-glass recovery resets the owner
+password, revokes admin sessions, and clears MFA. VoxHF stores public WebAuthn
+credential data and counters, never biometric data.
+
+Run the automated preflight and then the real-device matrix in
+[Admin MFA Validation](MFA_TESTING.md):
 
 ```powershell
 npm.cmd run relay:mfa:preflight -- https://relay.example.com
 ```
 
-Audit persistence and session IP/user-agent metadata are disabled by default.
-Operators can enable them with `VOXHF_RELAY_PERSIST_AUDIT=true` and
-`VOXHF_RELAY_STORE_SESSION_METADATA=true`. Audit rows older than
-`VOXHF_RELAY_AUDIT_RETENTION_DAYS` are removed automatically; disabling audit
-persistence removes existing audit rows during maintenance.
+## 10. Connect The Altitude PC
 
-The admin token is separate from normal account and agent credentials. It is a
-bootstrap and break-glass recovery secret, not the daily login. Keep it in a
-password manager.
-
-## Local Agent
-
-On the Altitude PC, update `config.json`:
-
-```json
-{
-  "remoteAgentEnabled": true,
-  "remoteRelayUrl": "wss://relay.example.com",
-  "remoteRelayToken": "account-agent-token",
-  "remoteDeviceId": "my-simulator-pc",
-  "remoteDeviceName": "Simulator PC"
-}
-```
-
-Update these fields inside the existing file and preserve its other settings.
-Keep `remoteDeviceId` stable after pairing; `remoteDeviceName` is the friendly
-label displayed to the user.
-
-Start VoxHF normally. The console should report the remote agent connection.
-Logged-in browsers for that account will see the agent.
-
-The optional **PC / Proxy Offline Alert** uses the relay's native agent
-heartbeat and a 30-second grace period by default. The local proxy supplies short-lived
-Push requests that are already encrypted and signed; the relay keeps them only
-in process memory and deletes them before one-time delivery. The built-in
-destination allowlist covers current major browser Push services. Operators
-should set `VOXHF_WATCHDOG_PUSH_ORIGINS` only when an intentionally supported
-browser uses another trusted exact HTTPS Push origin.
-
-Alternatively, generate the same configuration interactively:
+Install VoxHF Local on the simulator PC first. In its folder run:
 
 ```powershell
 npm.cmd run setup -- agent
 ```
 
-## Manual Token Mode
+Enter:
 
-For a small private relay without accounts, use the same
-`VOXHF_RELAY_TOKEN` in the agent and browser Remote settings. Manual-token
-browsers also require the short-lived pairing code printed by the local agent.
+```text
+Relay URL: wss://relay.example.com
+Agent token: the personal token from registration
+Device name: Simulator PC
+```
 
-Multiple independent env users can be configured with:
+Restart `start.bat`. The console should report the remote agent connection.
+Sign in at `https://app.example.com` from a trusted browser and select that
+agent if more than one is online.
+
+After all local agents are current, add this private override and restart to
+reject legacy WebSocket query tokens:
+
+```env
+VOXHF_RELAY_ALLOW_AGENT_QUERY_TOKEN=false
+```
+
+Use the [Local Installation](INSTALL_LOCAL.md) and [User Guide](USER_GUIDE.md)
+for pilot-side setup, notifications, and functional checks.
+
+## Private-Token Mode
+
+This mode has no hosted pilot accounts or account-based admin panel. Put the
+same `VOXHF_RELAY_TOKEN` in the local agent and in the browser's **Settings >
+Remote** manual setup. The browser must also enter the short-lived pairing code
+printed by the selected local agent.
+
+For multiple isolated env users:
 
 ```env
 VOXHF_RELAY_USERS=user1=hex-token-1,user2=hex-token-2
 ```
 
-The helper avoids manual editing:
+Manage them without hand-editing the list:
 
 ```bash
 npm run relay:user -- add user1 --env infra/docker/.env
 npm run relay:user -- rotate user1 --env infra/docker/.env
 npm run relay:user -- remove user1 --env infra/docker/.env
 npm run relay:user -- list --env infra/docker/.env
+infra/docker/voxhf-server.sh start
 ```
 
-Restart the relay after env token changes.
+## Authentication Modes And Migration
 
-## SQLite Helpers
+| Mode | Credential source | Use |
+| --- | --- | --- |
+| `env` | `.env` token(s) | Private-token deployment |
+| `sqlite-fallback` | SQLite plus `.env` tokens | Temporary migration from env tokens |
+| `sqlite` | Active hashed SQLite agent tokens | Account deployment |
 
-Inside a source checkout:
+New account installations can start directly in `sqlite`. Use
+`sqlite-fallback` only while migrating an existing env-token installation:
 
-```bash
-npm run relay:db:user -- list --db /var/lib/voxhf-relay/voxhf.db
-npm run relay:db:user -- add user1 --db /var/lib/voxhf-relay/voxhf.db
-npm run relay:db:user -- rotate user1 --db /var/lib/voxhf-relay/voxhf.db
-npm run relay:db:user -- revoke user1 --db /var/lib/voxhf-relay/voxhf.db
-npm run relay:db:user -- disable user1 --db /var/lib/voxhf-relay/voxhf.db
-npm run relay:db:user -- enable user1 --db /var/lib/voxhf-relay/voxhf.db
-npm run relay:db:user -- delete user1 --db /var/lib/voxhf-relay/voxhf.db
-```
+1. switch to `sqlite-fallback`;
+2. create/import the SQLite user and test its new agent token;
+3. switch to `sqlite`;
+4. remove obsolete env user tokens and restart.
 
-The Docker database lives in the named relay volume. Prefer the admin panel for
-normal operations and use the CLI only where the database path is mounted.
+Prefer the admin panel for normal account operations. Database CLI helpers are
+documented in [Development](DEVELOPMENT.md).
 
-## Backup
+## Backups And Restore
 
-Back up:
+Back up three things:
 
-- `infra/docker/.env`;
-- the relay Docker volume containing `voxhf.db`;
-- Caddy data if preserving certificates matters.
+- `infra/docker/.env` and private legal pages;
+- the relay SQLite data through the supported backup command;
+- Caddy data only if preserving the current certificate state matters.
 
-`infra/docker/defaults.env` does not need a separate backup because Git restores
-it. Never put secrets in that tracked file.
-
-Create a consistent online SQLite backup:
+Create a consistent live SQLite backup:
 
 ```bash
+cd /opt/voxhf
 infra/docker/voxhf-server.sh backup
 ```
 
-By default, files and SHA-256 metadata are written to
-`infra/docker/backups/`, outside the database volume and ignored by Git. Set
-`VOXHF_BACKUP_HOST_DIR` in the private `.env` to use another host directory.
-The relay removes recognized backups, metadata, and pre-restore database copies
-after 30 days during daily maintenance. Override
-`VOXHF_BACKUP_RETENTION_DAYS` in the private `.env` only when a different
-retention period is required. This cleanup does not select unrelated files.
+Backups and SHA-256 metadata go to `infra/docker/backups/` by default. They are
+ignored by Git. Copy important backups off the VPS. Recognized backup files are
+removed after 30 days by default; override `VOXHF_BACKUP_HOST_DIR` or
+`VOXHF_BACKUP_RETENTION_DAYS` in private `.env` when your documented policy
+requires it.
 
-Verify or restore a named backup:
+Restore a named backup:
 
 ```bash
-docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env \
-  exec -T voxhf-relay node scripts/relay-backup.js verify \
-  /var/backups/voxhf/voxhf-manual-TIMESTAMP.db
-
 infra/docker/voxhf-server.sh restore voxhf-manual-TIMESTAMP.db
 ```
 
-Restore stops only the relay, validates integrity/checksum, preserves the
-current database as a pre-restore file, restores, and waits for health. Test
-restoration before depending on any backup strategy. Back up `.env` separately;
-database backups intentionally do not contain deployment secrets.
+The command stops only the relay, verifies integrity/checksum, preserves the
+current database as a pre-restore copy, restores, restarts, and checks health.
+Test restoration before relying on any backup plan.
 
-## Update
+## Update And Roll Back
 
-When adopting this operator script on an existing VPS for the first time,
-create a provider snapshot and an off-server SQLite backup, pull the release
-manually, then run `doctor` and `start`. That bootstrap has no earlier
-`.voxhf-previous-release` record, so provider recovery is the rollback path for
-that one deployment. All later upgrades can use the managed command below.
+Before every update, read [CHANGELOG.md](../CHANGELOG.md), create a provider
+snapshot when appropriate, and keep an off-server backup.
+
+For a clean Git checkout on `main`:
 
 ```bash
 cd /opt/voxhf
 infra/docker/voxhf-server.sh update
 ```
 
-The command requires a clean Git checkout. It creates a pre-update database
-backup, performs a fast-forward pull, rebuilds the stack, waits for health, and
-records the previous commit and matching backup. If validation fails:
+The command creates a pre-update database backup, performs a fast-forward pull,
+rebuilds the stack, waits for health, and records the previous commit/backup.
+It refuses to overwrite tracked local changes.
+
+If the new deployment fails validation:
 
 ```bash
 infra/docker/voxhf-server.sh rollback
 ```
 
-Rollback is explicit because it resets tracked source files and restores the
-pre-update database. The database is restored before the previous image is
-rebuilt, so rollback also works when the older release did not include the
-backup helper. Private `.env` values and Docker volumes are not stored in Git.
-Read [CHANGELOG.md](../CHANGELOG.md) before updating and retain off-server
-copies of important backups.
+Rollback intentionally restores both the previous source commit and its
+pre-update database. Private `.env` values and Docker volumes are not stored in
+Git. The first adoption of this workflow has no earlier rollback record, so use
+the provider snapshot for that one upgrade.
 
-Useful daily commands:
+For OS and Docker security updates:
 
 ```bash
-infra/docker/voxhf-server.sh doctor
-infra/docker/voxhf-server.sh logs
+sudo apt update
+sudo apt full-upgrade -y
+sudo reboot
 ```
 
-### Agent Version Policy
+After reconnecting:
 
-The relay advertises its own version as the recommended Local version by
-default. `VOXHF_RELAY_RECOMMENDED_AGENT_VERSION` can override that warning.
-Leave `VOXHF_RELAY_MINIMUM_AGENT_VERSION` empty while older agents remain
-compatible. Set a minimum only for an incompatible protocol or important
-security update and only after the matching Local artifact is published.
+```bash
+cd /opt/voxhf
+infra/docker/voxhf-server.sh doctor
+docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env ps
+```
 
-An agent below the configured minimum receives `agent-update-required`, is not
-registered as an online device, and stops its reconnect loop until VoxHF is
-updated and restarted. Recommended-only mismatches show a dismissible update
-notice without interrupting a flight.
+The services use `restart: unless-stopped` and should return automatically.
 
-## Security Checklist
+## Agent Version Policy
 
-- Keep `VOXHF_ALLOWED_ORIGINS` limited to exact HTTPS origins.
-- Use unique 32-byte hex tokens.
-- Keep invite-only registration enabled; disable registration entirely when it
-  is not needed.
-- Restrict SSH, use key authentication, and keep the VPS updated.
-- Expose only `80`, `443`, and the required SSH source range.
-- Never publish `.env`, `config.json`, database files, or logs with tokens.
-- Review admin/audit events and revoke lost browser sessions or agent tokens.
-- Verify that `sw.js` and `manifest.webmanifest` are served by the app domain
-  without long-lived caching, then test per-device notifications and
-  multi-device session chat recovery through the connected local agent.
-- Keep local VoxHF proxy ports private.
-- Do not add voice recording or chat persistence without a separate privacy
-  design and user consent.
+The relay package version is the recommended Local version by default. Set
+`VOXHF_RELAY_RECOMMENDED_AGENT_VERSION` only to override that warning. Leave
+`VOXHF_RELAY_MINIMUM_AGENT_VERSION` empty while older agents are compatible.
 
-See [Security](../SECURITY.md), [Privacy](PRIVACY.md), and
-[Threat Model](THREAT_MODEL.md).
+Set a minimum only for a protocol incompatibility or important security fix,
+and only after the matching Local artifact is published. Agents below it are
+rejected; recommended-only mismatches show a dismissible notice.
+
+## Privacy And Operations Defaults
+
+- Account/session/token records needed for authentication are stored in
+  SQLite; audio and chat are not.
+- Session IP/user-agent metadata is disabled unless
+  `VOXHF_RELAY_STORE_SESSION_METADATA=true`.
+- Persistent audit events are disabled unless
+  `VOXHF_RELAY_PERSIST_AUDIT=true`; enabled audit rows default to seven-day
+  retention and never include message/audio payloads.
+- The optional PC/proxy offline alert keeps sealed short-lived Push requests in
+  process memory only. They are already encrypted and signed by the local
+  proxy and never enter SQLite, logs, audits, or backups.
+- The local proxy, not the relay, stores Web Push credentials, subscriptions,
+  chat history, and timer state.
+
+See [Privacy Architecture](PRIVACY.md) for the complete data inventory.
+
+## Security Checklist Before Inviting Users
+
+- DNS and HTTPS work for all three domains.
+- Only the real SSH port, 80, and 443 are exposed.
+- SSH uses keys and the VPS is patched.
+- `.env`, tokens, databases, private legal pages, and backups are not public.
+- `VOXHF_ALLOWED_ORIGINS` contains only exact trusted HTTPS origins.
+- Registration is invite-only, or disabled when unused.
+- Every supported local agent uses header authentication and legacy query-token
+  compatibility is disabled.
+- Deployment-specific Terms and Privacy pages are published.
+- Backup and restore have both been tested and an off-server copy exists.
+- Admin and pilot recovery procedures have been tested.
+- Notifications, chat recovery, RX, and TX have been tested from every device
+  class the deployment supports.
+- No local VoxHF port is forwarded from the simulator PC.
+
+See [Security Policy](../SECURITY.md) and the [Threat Model](THREAT_MODEL.md).
+
+## Server Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| `doctor` reports placeholders | Edit `infra/docker/.env` and replace every example value. |
+| TLS certificate fails | Confirm all DNS records resolve to the VPS and ports 80/443 are reachable. |
+| `Permission denied` on the operator script | Run `chmod +x infra/docker/voxhf-server.sh`. |
+| Relay health is unavailable | Run `infra/docker/voxhf-server.sh logs` and inspect Caddy/relay container state. |
+| Browser WebSocket is rejected | Check the exact app origin in `VOXHF_ALLOWED_ORIGINS`, account/token state, and server clock. |
+| Agent is rejected after token rotation | Update `config.json` on the simulator PC and restart the local agent. |
+| Account registration is unavailable | Confirm SQLite auth and `VOXHF_RELAY_ENABLE_REGISTRATION=true`; invite-only registration also needs a fresh admin invite. |
+| Passkey fails after a domain change | Passkeys are RP-ID/domain-bound; restore the original domain or enroll a new passkey through break-glass recovery. |
+| Update refuses a dirty checkout | Preserve/commit intentional changes or deploy a clean release; never force the managed update over unknown edits. |
+| Restore file is not found | Use the exact filename shown in the configured backup directory. |

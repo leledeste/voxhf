@@ -1,114 +1,130 @@
 # Privacy Architecture
 
-This document describes VoxHF's technical privacy defaults. The official
-hosted beta publishes its user-facing policy at
-[voxhf.com/privacy](https://voxhf.com/privacy). Independent server operators
-must publish terms appropriate to their own deployment.
+This document describes the data handled by the VoxHF software. A public
+server operator must publish a user-facing Privacy Policy for that deployment;
+the project templates are not a substitute for operator-specific legal text.
 
-VoxHF should be designed so remote access can work without storing IVAO traffic, voice audio, or chat history on a central server.
+## Data Flow Summary
 
-## Data Minimization
+- The local agent processes IVAO/PilotCore/FSD/TS2 state on the simulator PC
+  and remains the source of truth.
+- A local browser talks directly to that agent.
+- In remote mode, a trusted relay routes authenticated parsed state, commands,
+  messages, and live audio between the selected browser and agent.
+- The relay does not connect to IVAO and does not need IVAO credentials.
 
-The relay should collect only the data needed to authenticate users, pair devices, route live sessions, and protect the service from abuse.
+## Relay Data Stored In SQLite
 
-## Data The Relay Stores For Accounts
+Account mode stores only the control-plane records needed to operate the
+service:
 
-- Username and display name. VoxHF does not currently request email addresses.
-- Hashed authentication/session identifiers.
-- Paired device metadata, such as device name and creation time.
-- Paired-browser records, stored as hashed browser ids and agent ids.
-- Session creation, last-use, expiry, and revocation timestamps.
+- username and display name; VoxHF does not request an email address;
+- password hashes, hashed agent tokens, and hashed session identifiers;
+- account status, timestamps, and legal-document acceptance versions;
+- known agent/device and paired-browser records;
+- server-side browser and admin session records;
+- optional admin passkey public credentials/counters and hashed recovery codes;
+- optional bounded audit events when the operator enables persistence.
 
-Optional persistence is disabled by default:
+Session IP address and user-agent metadata are stored only when
+`VOXHF_RELAY_STORE_SESSION_METADATA=true`. Audit persistence is stored only
+when `VOXHF_RELAY_PERSIST_AUDIT=true`. Both are disabled by default.
 
-- `VOXHF_RELAY_STORE_SESSION_METADATA=true` stores session IP and user-agent.
-- `VOXHF_RELAY_PERSIST_AUDIT=true` stores bounded admin, agent, and pairing
-  audit events without message or audio payloads.
+## Data The Relay Does Not Persist
 
-## Data The Relay Should Not Store
+- IVAO or Altitude credentials;
+- raw FSD, TS2, or PilotCore traffic;
+- voice audio or recordings;
+- chat history or full message contents;
+- full passwords, agent tokens, session tokens, or cookies;
+- active pairing, registration-invite, or password-recovery codes in plaintext;
+- normal Web Push subscriptions, encryption keys, or VAPID credentials;
+- flight position, flight plan, weather, radio, XPDR, or high-frequency audio
+  state as database records.
 
-- IVAO credentials.
-- Altitude credentials.
-- Voice audio recordings.
-- Raw TS2 packets.
-- Raw FSD packets.
-- Chat history.
-- Full message contents.
-- Full authentication tokens.
-- Pairing and registration invite codes after use or expiry.
-- Browser Push subscriptions or Push encryption keys. Subscription commands
-  pass through the relay only to the selected local agent. If a user explicitly
-  enables the agent-offline watchdog, the relay temporarily holds a Push
-  endpoint and a short-lived request already encrypted and signed by that
-  agent. It remains in memory only and is deleted after use, disarm, replacement,
-  expiry, or relay restart. Its signature expires within 15 minutes; a modified
-  relay could replay only that same opaque alert before expiry, not read or
-  alter it.
+Live relayed state and audio necessarily exist in process/network memory while
+being routed, then are discarded.
 
-## Data Kept By The Local Agent
+### PC/Proxy Offline Watchdog Exception
 
-- Up to 200 recent typed chat events in memory for the current proxy session,
-  so a browser refresh or reconnect can recover the conversation.
-- Web Push VAPID credentials and enabled-device subscriptions in
-  `.voxhf-local/notifications.json`.
+When a remote browser explicitly enables this alert, the local proxy may give
+the relay a short-lived one-use Push request containing that device's Push
+endpoint and an alert already encrypted and signed by the proxy. The relay:
 
-Chat history is cleared when the local proxy stops. Notification state remains
-local to the simulator PC until a device is disabled or the private local state
-file is removed.
+- keeps it only in process memory;
+- never receives the local VAPID private key;
+- never writes the endpoint or request to SQLite, logs, audits, or backups;
+- deletes it after delivery, disarm, replacement, expiry, or restart.
 
-## Retention Targets
+The signature expires within 15 minutes. A malicious relay could replay only
+the same opaque alert before expiry; it could not read, change, or sign another
+notification.
 
-Suggested defaults:
+## Data Stored By The Local Agent
 
-- Account records: until account deletion.
-- Device records: until device revocation or account deletion.
-- Active session records: deleted when no longer needed.
-- Audit events: disabled by default; 7 days when enabled unless configured.
-- Registration invites: in memory, one use, 24 hours by default.
-- Pairing codes: in memory, 10 minutes by default.
-- Preview paired-browser records: until browser revocation or manual relay store deletion.
-- SQLite backups and pre-restore database copies: 30 days by default.
-- Raw remote payloads: not persisted.
-- Agent-offline Push tickets: memory-only, at most 20 minutes, normally
-  refreshed every 5 minutes, and one-use after the offline grace period.
+Memory-only for the current proxy process:
 
-Self-hosted operators can choose different retention, but they should document it.
+- up to 200 recent typed chat events for browser refresh/reconnect recovery;
+- current flight, radio, weather, notification-retry, and three-minute timer
+  state;
+- live audio buffers and codec process state.
 
-## User Controls
+Private local files:
 
-Remote mode should eventually provide:
+- `config.json` for local and optional relay configuration/agent token;
+- `.voxhf-local/notifications.json` for VAPID credentials and subscribed
+  browser devices.
 
-- Delete account.
-- Revoke device.
-- Revoke all sessions.
-- Export account/device metadata.
-- Disable remote access from the local agent.
+Stopping the proxy clears memory-only history and timers. Notification
+credentials remain until the user disables/removes them or deletes the private
+state. Audio is never recorded.
 
-## Self-Hosted Responsibility
+## Default Lifetimes
 
-When someone self-hosts a relay, they become responsible for their own deployment, logs, backups, users, and privacy obligations.
+| Data | Default lifetime |
+| --- | --- |
+| Account and device records | Until revocation/deletion by the user/operator |
+| Pilot browser session | Up to 30 days, subject to logout/revocation |
+| Admin session | 12-hour absolute and 30-minute idle limits |
+| Registration invite | Memory-only, one use, 24 hours |
+| Browser pairing code | Memory-only, one use, 10 minutes |
+| Password-recovery code | Hashed, one use, 30 minutes |
+| Audit rows | Disabled; seven days when enabled |
+| SQLite backups/pre-restore copies | 30 days in managed backup storage |
+| Agent-offline Push ticket | Memory-only, refreshed while armed; expires within 15 minutes and is one-use |
+| Local chat history | Current proxy process only, maximum 200 events |
 
-The project should provide safe defaults, but operators still need to configure hosting, backups, access control, and retention responsibly.
+Operators may change configurable lifetimes and backup retention, but must
+document their actual policy.
 
-## Official Relay Responsibility
+## User And Operator Controls
 
-An operator offering a hosted service should publish:
+Logged-in pilots can:
 
-- a Privacy Policy and Terms of Use;
-- retention and infrastructure-provider information;
-- a privacy, security, and account-deletion contact for that deployment.
+- list browser sessions and revoke other devices;
+- log out and change their password;
+- rotate the personal agent token;
+- disable notifications and the optional offline watchdog per device;
+- stop remote access from the local agent.
 
-## Design Defaults
+The server owner can disable/enable/delete accounts, revoke pairings and
+sessions, rotate/revoke agent tokens, and issue one-use password-recovery codes.
+Account deletion removes the relay account records governed by the deployment;
+external backups then follow that operator's retention schedule.
 
-- Remote access disabled by default in the local agent.
-- No public exposure of the local proxy.
-- Parsed local FSD events sent to the browser should omit raw protocol lines.
-- No chat or audio storage on the relay.
-- Remote RX and TX audio forwarding should remain live-only and should not be cached or replayed.
-- Short-lived pairing.
-- Revocable devices.
-- Audit persistence disabled by default. When enabled, events store bounded
-  metadata such as event type, user id, agent id, pairing id, and timestamp,
-  never chat text, voice audio, raw FSD, or raw TS2 data. IP storage remains a
-  separate opt-in choice.
-- Clear UI indication when a remote session is active.
+VoxHF does not currently provide a self-service data-export workflow. An
+operator receiving an access or deletion request must use the deployment's
+admin and backup procedures and applicable policy.
+
+## Operator Responsibilities
+
+Anyone operating a relay is responsible for its infrastructure, access
+control, logs, backups, legal basis, notices, retention, user support, and
+incident response. Before accepting other users, publish deployment-specific
+Terms and Privacy pages that identify the operator and hosting providers.
+
+Connecting to a third-party relay means trusting its operator with account
+metadata and live relayed traffic. Self-hosting reduces that dependency but
+does not remove the need to secure the VPS and local PC.
+
+Installation and legal-page steps are in [Self-Hosting](SELF_HOSTING.md).

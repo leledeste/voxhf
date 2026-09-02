@@ -1,162 +1,86 @@
 # Dependency And License Policy
 
-Status: active policy
+VoxHF is licensed under **AGPL-3.0-only**. Dependencies must permit source and
+binary redistribution with an AGPL application, and every required notice or
+source obligation must be satisfied in release packages.
 
-VoxHF should stay easy to audit and redistribute. New dependencies are
-allowed only when they clearly reduce project risk or complexity, and their
-licenses must be compatible with VoxHF's MIT license.
+## Selection Rules
 
-## Goals
+Add a dependency only when it materially reduces risk or complexity compared
+with clear standard-library code. Prefer packages that are:
 
-- Keep the source repository redistributable under MIT.
-- Prefer small, mature, actively maintained packages.
-- Prefer permissive open-source licenses.
-- Avoid dependencies that force VoxHF itself to change license.
-- Keep external tools, especially FFmpeg, clearly documented when they are not
-  bundled.
-- Make license review part of normal development before a dependency is added.
+- small, mature, maintained, and widely reviewed;
+- available from a stable upstream source;
+- explicit about license and redistribution terms;
+- free of install-time downloads or bundled native binaries unless those are
+  justified and tested;
+- scoped to development rather than runtime when possible.
 
-## Allowed Licenses
+Permissive licenses such as MIT, Apache-2.0, BSD, ISC, and 0BSD are normally
+acceptable. Copyleft, dual, source-available, custom, unclear, or binary-bundled
+terms require explicit review. A dependency is rejected when its terms cannot
+be satisfied together with VoxHF's AGPL distribution and network-source
+obligations.
 
-These licenses are acceptable by default:
+Do not describe AGPL, GPL, LGPL, MPL, or another copyleft license as inherently
+disallowed. Compatibility depends on the exact version, linking/distribution
+model, modifications, and combined-work obligations. Record the decision in
+[Third-Party Notices](THIRD_PARTY_NOTICES.md).
 
-- MIT
-- Apache-2.0
-- BSD-2-Clause
-- BSD-3-Clause
-- ISC
-- 0BSD
-- Unlicense / public domain, after checking project provenance
-
-Other permissive open-source licenses can be accepted case by case, but must be
-documented in [Third-Party Notices](THIRD_PARTY_NOTICES.md).
-
-## Licenses Requiring Explicit Review
-
-These licenses are not automatically forbidden, but they require an explicit
-decision before use:
-
-- LGPL
-- MPL-2.0
-- EPL
-- CC0 for code dependencies
-- Dual-licensed packages
-- Packages with generated binaries or bundled native libraries
-
-If one of these is accepted, the reason and obligations must be documented.
-
-## Disallowed Licenses For Runtime Dependencies
-
-These are not allowed for normal runtime dependencies unless the project makes a
-conscious licensing change:
-
-- GPL
-- AGPL
-- SSPL
-- Commons Clause
-- Business Source License
-- Licenses marked "source available" but not OSI/open-source compatible
-- Packages with missing, unknown, custom, or unclear licenses
-
-The main concern is avoiding copyleft or non-open terms that would surprise
-users who self-host, redistribute, or inspect VoxHF.
-
-## Current Dependency Baseline
+## Current Baseline
 
 Runtime npm dependencies:
 
-- `ws`: WebSocket server/client support, MIT license.
-- `web-push`: standards-based VAPID signing and Web Push delivery from the
-  local proxy, MPL-2.0 license. This dependency is accepted after explicit
-  review because it is used unmodified as a separate npm module; its license
-  and source notice remain in the installed package and release lockfile.
-- `@simplewebauthn/server` and `@simplewebauthn/browser`: optional admin
-  passkey MFA, MIT license. Cryptographic WebAuthn verification remains in the
-  maintained upstream package rather than project-specific code.
+| Package | Purpose | License/handling |
+| --- | --- | --- |
+| `ws` | WebSocket client/server | MIT |
+| `web-push` | Local VAPID and Web Push delivery | MPL-2.0; used unmodified as a separate npm module and distributed with its notice/source metadata |
+| `@simplewebauthn/server`, `@simplewebauthn/browser` | Optional admin passkey MFA | MIT |
+| `better-sqlite3` | Relay SQLite binding | MIT; native binding covered by supported-platform install tests |
 
-External tools:
+Development-only `yazl` and `yauzl` create and inspect ZIP artifacts. They are
+MIT licensed and excluded from Local and Server runtime lockfiles.
 
-- `ffmpeg`: used as a system executable, not bundled in the repository.
-  FFmpeg licensing depends on the exact build installed by the user.
+SQLite is public domain. FFmpeg is an external executable discovered from the
+system `PATH`; VoxHF does not bundle it. The exact FFmpeg build selected by the
+user determines its license configuration.
 
-Database dependency:
+The authoritative version and transitive-license inventory is
+`package-lock.json`, not this prose summary.
 
-- SQLite itself is public domain.
-- SQLite wrapper: `better-sqlite3`, MIT license.
-- `better-sqlite3` uses a native binding, so Windows and Linux installs must
-  stay covered by CI before release.
-- The project Node.js engine baseline is Node 20 or newer because current
-  `better-sqlite3` versions require that line or newer.
-- The installed dependency tree was reviewed from `package-lock.json` when
-  `better-sqlite3` was added. Runtime licenses are permissive, and `npm audit`
-  was clean after updating `ws` to a non-vulnerable release.
-- `node:sqlite` was reviewed as a future no-dependency option, but it should
-  not be the first implementation target while it is still marked release
-  candidate in the Node.js documentation and would require a higher Node.js
-  baseline.
+## Review Checklist
 
-Development-only packaging dependencies:
+Before adding or updating a package:
 
-- `yazl` and `yauzl`, both MIT licensed, create and verify ZIP release
-  artifacts. They are excluded from Local and Server runtime lockfiles.
+1. Inspect its declared license, license files, upstream repository, release
+   history, and maintenance state.
+2. Inspect the complete lockfile change and transitive dependencies.
+3. Check for native code, bundled binaries, install scripts, runtime downloads,
+   telemetry, or unexpected network access.
+4. Decide whether it belongs in runtime or development dependencies.
+5. Confirm AGPL-compatible redistribution and document any extra obligations.
+6. Update [Third-Party Notices](THIRD_PARTY_NOTICES.md).
+7. Add focused integration tests and run `npm.cmd run verify` plus
+   `npm.cmd audit`.
+8. Inspect every generated package to ensure only intended dependencies and
+   notices are present.
 
-## Review Process For New Dependencies
+The repository verification checks lockfile license expressions against the
+reviewed allowlist. Automation is a guard, not a substitute for legal and
+security review.
 
-Before adding a new dependency:
+## FFmpeg Distribution
 
-1. Check the package license in `package-lock.json`, package metadata, and the
-   upstream repository.
-2. Check whether the package ships native binaries or downloads binaries at
-   install/runtime.
-3. Check maintenance status, release history, and issue activity.
-4. Check whether the dependency is needed at runtime or only for development.
-5. Add the dependency and license to
-   [Third-Party Notices](THIRD_PARTY_NOTICES.md).
-6. Add or update tests that prove the new dependency is actually wired
-   correctly.
+If a future release bundles FFmpeg, it must document the exact build options
+and license mode, include required notices and source/build references, and
+update the release/package verification before publication.
 
-The dependency should not be added if the same outcome can be achieved with a
-small amount of clear standard-library code.
+## Database Boundary
 
-## Automated Checks
+SQLite is for low-frequency control-plane data: accounts, hashed credentials,
+pairings, sessions, devices, legal acceptance, and optional bounded audit
+events. It must not contain IVAO credentials, raw FSD/TS2 traffic, voice audio,
+chat history, or high-frequency flight/audio state.
 
-The current repository has a small built-in verification command:
-
-```bash
-npm run verify
-```
-
-This command checks installed npm package license expressions from
-`package-lock.json` against the allowed/blocked license policy. It is not a
-replacement for human dependency review, but it fails CI when a package has a
-missing, blocked, or unreviewed license expression.
-
-## FFmpeg Policy
-
-VoxHF currently calls `ffmpeg` from the system `PATH` and does not bundle
-FFmpeg binaries. This keeps redistribution simple.
-
-If a future release bundles FFmpeg:
-
-- The exact build and license mode must be documented.
-- License files and notices from that build must be included.
-- Source/build references required by that build must be provided.
-- `docs/THIRD_PARTY_NOTICES.md` must be updated before release.
-
-## Database Policy
-
-SQLite is acceptable as the default self-host database because VoxHF's
-database work should be low-frequency control-plane data: users, tokens,
-pairings, revocations, and audit events.
-
-The database must not store:
-
-- IVAO credentials.
-- Raw IVAO/FSD traffic.
-- Voice audio.
-- High-frequency packet/audio state.
-- Chat history by default.
-
-If VoxHF later serves a large public relay, PostgreSQL can be added as an
-optional production database, but SQLite should remain the simple self-host
-default.
+A different database may be introduced for measured scale requirements, but
+SQLite remains the simple self-host default while it meets the workload.
