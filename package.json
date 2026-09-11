@@ -1,6 +1,6 @@
 {
   "name": "voxhf",
-  "version": "0.1.2-beta.2",
+  "version": "0.1.2-beta.3",
   "description": "Local IVAO Altitude bridge with browser radio, chat and voice controls.",
   "main": "proxy.js",
   "license": "AGPL-3.0-only",
@@ -14,6 +14,7 @@
     "relay:db:user": "node scripts/relay-db-user.js",
     "relay:backup": "node scripts/relay-backup.js",
     "relay:backup:test": "node scripts/test-relay-backup.js",
+    "server:test": "node scripts/test-server-update.js",
     "db:test": "node scripts/test-relay-db.js",
     "db:auth:test": "node scripts/test-relay-db-auth.js",
     "db:user:test": "node scripts/test-relay-db-user.js",
@@ -22,8 +23,11 @@
     "relay:account:test": "node scripts/test-relay-account.js",
     "site:preview": "node scripts/preview-site.js",
     "setup:test": "node scripts/test-setup.js",
-    "fsd:test": "node scripts/test-fsd-disconnect.js",
+    "fsd:test": "node scripts/test-fsd-disconnect.js && node scripts/test-fsd-stream.js",
     "webtx:test": "node scripts/test-web-tx.js",
+    "local-web:test": "node scripts/test-local-web-server.js",
+    "ts2:test": "node scripts/test-ts2-dns.js && node scripts/test-ts2-routing.js && node scripts/test-ts2-loopback.js",
+    "voice-route:test": "node scripts/test-voice-route-trace.js",
     "unicom:test": "node scripts/test-unicom-timer.js",
     "watchdog:test": "node scripts/test-agent-watchdog.js",
     "release:prepare": "node scripts/prepare-release.js",
@@ -38,6 +42,7 @@
     "remote:check": "node scripts/check-remote-preview.js",
     "remote:test": "node scripts/test-remote-preview.js",
     "webapp:test": "node scripts/test-webapp-regressions.js",
+    "weather:test": "node scripts/test-weather.js",
     "verify": "node scripts/check.js",
     "check": "npm run verify"
   },
@@ -49,11 +54,11 @@
     "websocket"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.2.0",
-    "@simplewebauthn/server": "^13.3.1",
+    "@simplewebauthn/server": "^13.3.2",
     "better-sqlite3": "^12.11.1",
     "web-push": "^3.6.7",
     "ws": "^8.21.0"

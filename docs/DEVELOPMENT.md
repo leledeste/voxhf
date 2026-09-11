@@ -15,7 +15,7 @@ npm.cmd run verify
 
 Requirements:
 
-- Node.js 20 or newer.
+- Node.js 24 or newer; CI and Docker use Node.js 24 LTS.
 - ffmpeg with Speex support for live voice work.
 - Windows and Altitude for real IVAO integration tests.
 - Docker only for self-hosted relay testing.
@@ -30,10 +30,14 @@ Requirements:
 | `npm run setup -- server` | Generate a Docker self-hosting environment. |
 | `npm.cmd run remote:test` | Temporary relay with two users, pairing, controls, RX/TX binary routing, and revocation. |
 | `npm.cmd run webapp:test` | Browser-state regressions for workspace accounts/sessions, chat history, Settings, iOS/iPadOS RX activation and recovery, notifications, UNICOM timer, reconnect recovery, radios, XPDR, and route weather. |
+| `npm.cmd run weather:test` | Shared METAR/TAF decoding, MPS wind conversion, visibility limits/fractions, corrected headers, forecast sections, and remarks. |
 | `npm.cmd run relay:account:test` | Hosted pilot-account registration, login, recovery, sessions, and deletion. |
 | `npm.cmd run relay:admin:test` | Relay-owner administration, sessions, recovery, and optional MFA paths. |
-| `npm.cmd run fsd:test` | Confirmed disconnect detection and stationary-aircraft suppression policy. |
-| `npm.cmd run webtx:test` | Web TX readiness and atomic TS2 session replacement across alternating UDP flows. |
+| `npm.cmd run fsd:test` | Confirmed disconnect policy, TCP record framing, and VOICE host rewriting. |
+| `npm.cmd run local-web:test` | Local WebSocket error/close cleanup, stale commands/PCM, initial-send failures, healthy peers, and a real oversized frame on localhost. |
+| `npm.cmd run webtx:test` | Web TX readiness, alternating UDP flows, rapid PTT restarts, delayed encoder exits/output, monitor cleanup, and independent browser sessions. |
+| `npm.cmd run ts2:test` | DNS ordering, per-server routing, asynchronous FSD rewriting, TX/RX session ownership, and real local TCP/UDP loopback transport. No IVAO connection. |
+| `npm.cmd run voice-route:test` | Verify optional routing tracing preserves traffic and excludes sensitive payloads. |
 | `npm.cmd run unicom:test` | Deterministic three-minute reminder state and expiry behavior. |
 | `npm.cmd run watchdog:test` | Memory-only relay watchdog staging, expiry, reconnect, and delivery behavior. |
 | `npm.cmd run remote:check` | Compare local relay `.env` with `config.json` and check relay health. |
@@ -42,11 +46,20 @@ Requirements:
 | `npm.cmd run release:verify` | Inspect checksums, ZIP contents, locks, and package structure. |
 | `npm.cmd run release:test` | Extract all ZIPs and perform clean isolated installs. |
 | `npm.cmd run relay:backup:test` | Create, mutate, and restore a temporary SQLite database. |
-| `npm.cmd run update:test` | Download and stage Local through verified release metadata. |
+| `npm.cmd run server:test` | Run the deployment shell script against stubbed commands; failed safety backups must block updates and running-relay rollbacks. Requires POSIX sh (Git for Windows is supported). |
+| `npm.cmd run update:test` | Requires prepared release artifacts. Verify downloads; on Windows, test staging with inherited/foreign/absent module paths, literal file paths, synthetic private state, and extraction/metadata failures. |
 | `npm.cmd run release:version -- <version>` | Synchronize package and update-policy versions. |
 
 Run `verify` and `remote:test` before every commit that changes the
 webapp, proxy, protocol, relay, database, or release layout.
+
+The Local updater starts Windows PowerShell through Node, an intermediate host
+that can inherit PowerShell 7's incompatible `PSModulePath`. Remove that variable
+only from the extractor's child environment so Windows PowerShell constructs its
+own defaults. Do not work around module-loading failures by weakening execution
+policy or changing the user's installed modules. See Microsoft's
+[module-path inheritance explanation](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath?view=powershell-7.6#starting-windows-powershell-from-powershell-7).
+Staging tests use an isolated fixture installation, never real local credentials.
 
 ## Source Layout
 

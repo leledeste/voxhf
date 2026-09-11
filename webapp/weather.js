@@ -46,6 +46,24 @@
     return token.startsWith('M') ? `-${token.slice(1)}` : token;
   }
 
+  function weatherTokens(raw) {
+    const tokens = String(raw || '').trim().replace(/=$/, '').trim().toUpperCase().split(/\s+/);
+    // A mixed statute-mile value is one group even though it contains a space.
+    // Merge before decoding so its integer part cannot be lost or read as metres.
+    for (let i = 0; i < tokens.length - 1; i += 1) {
+      if (/^[MP]?\d{1,2}$/.test(tokens[i]) && /^\d+\/[1-9]\d*SM$/.test(tokens[i + 1])) {
+        tokens.splice(i, 2, `${tokens[i]} ${tokens[i + 1]}`);
+      }
+    }
+    return tokens;
+  }
+
+  function windSpeed(value, unit) {
+    const speed = Number(value);
+    // Preserve the reported unit; the rounded knot value is supplementary.
+    return unit === 'MPS' ? `${speed} m/s (~${Math.round(speed * 3600 / 1852)} kt)` : `${speed} kt`;
+  }
+
   function cloudHeight(token) {
     if (!token || token === '///') return 'height unknown';
     return `${Number(token) * 100} ft`;
@@ -145,14 +163,15 @@
       return true;
     }
 
-    const wind = /^(VRB|\d{3})(\d{2,3})(G(\d{2,3}))?KT$/.exec(token);
+    const wind = /^(VRB|\d{3})(\d{2,3})(?:G(\d{2,3}))?(KT|MPS)$/.exec(token);
     if (wind) {
       const direction = wind[1] === 'VRB' ? 'variable' : `${Number(wind[1])} degrees`;
-      const gust = wind[4] ? `, gusting ${Number(wind[4])} kt` : '';
+      const gust = wind[3] ? `, gusting ${windSpeed(wind[3], wind[4])}` : '';
+      const calm = wind[1] === '000' && Number(wind[2]) === 0 && !wind[3];
       rows.push({
         label: `${context}Wind`.trim(),
-        value: `${direction} at ${Number(wind[2])} kt${gust}`,
-        hint: 'Wind is reported as direction from which it blows, then speed in knots.',
+        value: `${calm ? 'Calm, ' : `${direction} at `}${windSpeed(wind[2], wind[4])}${gust}`,
+        hint: 'Direction is where the wind blows from, in degrees true. MPS means metres per second; the knot equivalent is approximate.',
       });
       return true;
     }
@@ -170,16 +189,17 @@
     if (/^\d{4}$/.test(token)) {
       rows.push({
         label: `${context}Visibility`.trim(),
-        value: token === '9999' ? '10 km or more' : `${Number(token)} m`,
-        hint: 'Prevailing visibility in meters. 9999 means 10 km or more.',
+        value: token === '9999' ? '10 km or more' : token === '0000' ? 'Less than 50 m' : `${Number(token)} m`,
+        hint: 'Prevailing visibility in metres. 0000 means less than 50 m; 9999 means 10 km or more.',
       });
       return true;
     }
 
-    if (/^\d+(\/\d+)?SM$/.test(token)) {
+    const miles = /^([MP]?)(\d+(?: \d+\/[1-9]\d*|\/[1-9]\d*)?)SM$/.exec(token);
+    if (miles) {
       rows.push({
         label: `${context}Visibility`.trim(),
-        value: `${token.replace('SM', '')} statute miles`,
+        value: `${miles[1] === 'M' ? 'Less than ' : miles[1] === 'P' ? 'More than ' : ''}${miles[2]} statute miles`,
         hint: 'Visibility in statute miles, common in US-style METARs.',
       });
       return true;
@@ -252,23 +272,23 @@
   function interpretMetar(raw) {
     // The interpreter is deliberately conservative: recognized groups become
     // readable rows, while unknown tokens remain listed instead of being guessed.
-    const text = String(raw || '').replace(/=$/, '').trim();
-    if (!text) return null;
-    const tokens = text.split(/\s+/);
+    const tokens = weatherTokens(raw);
     const rows = [];
     const unparsed = [];
     let index = 0;
 
     if (/^(METAR|SPECI)$/i.test(tokens[index])) index += 1;
     const type = index > 0 ? tokens[index - 1].toUpperCase() : 'METAR';
+    const corrected = tokens[index] === 'COR';
+    if (corrected) index += 1;
     const station = /^[A-Z]{4}$/.test(tokens[index] || '') ? tokens[index++] : '';
     const time = /^(\d{2})(\d{2})(\d{2})Z$/.exec(tokens[index] || '');
     if (!station || !time) return null;
 
     rows.push({
       label: 'Report',
-      value: `${type} for ${station}`,
-      hint: 'METAR is a routine aviation weather observation. SPECI is a special observation.',
+      value: `${type}${corrected ? ' COR' : ''} for ${station}`,
+      hint: 'METAR is a routine aviation weather observation. SPECI is a special observation. COR means corrected.',
     });
     rows.push({
       label: 'Observed',
@@ -284,108 +304,6 @@
       if (token === 'RMK') {
         appendRemarks(tokens.slice(index + 1).map(value => value.toUpperCase()), rows);
         break;
-      }
-
-      if (appendUnavailableConditionRow(token, rows)) continue;
-
-      if (token === 'CAVOK') {
-        rows.push({
-          label: 'Visibility/cloud',
-          value: 'Ceiling and visibility OK',
-          hint: 'CAVOK means visibility 10 km or more, no significant weather, and no relevant low cloud.',
-        });
-        continue;
-      }
-
-      const wind = /^(VRB|\d{3})(\d{2,3})(G(\d{2,3}))?KT$/.exec(token);
-      if (wind) {
-        const direction = wind[1] === 'VRB' ? 'variable' : `${Number(wind[1])} degrees`;
-        const gust = wind[4] ? `, gusting ${Number(wind[4])} kt` : '';
-        rows.push({
-          label: 'Wind',
-          value: `${direction} at ${Number(wind[2])} kt${gust}`,
-          hint: 'Wind is reported as direction from which it blows, then speed in knots.',
-        });
-        continue;
-      }
-
-      const variableWind = /^(\d{3})V(\d{3})$/.exec(token);
-      if (variableWind) {
-        rows.push({
-          label: 'Wind variation',
-          value: `${Number(variableWind[1])} to ${Number(variableWind[2])} degrees`,
-          hint: 'Variable direction range reported when wind direction changes significantly.',
-        });
-        continue;
-      }
-
-      if (/^\d{4}$/.test(token)) {
-        rows.push({
-          label: 'Visibility',
-          value: token === '9999' ? '10 km or more' : `${Number(token)} m`,
-          hint: 'Prevailing visibility in meters. 9999 means 10 km or more.',
-        });
-        continue;
-      }
-
-      if (/^\d+(\/\d+)?SM$/.test(token)) {
-        rows.push({
-          label: 'Visibility',
-          value: `${token.replace('SM', '')} statute miles`,
-          hint: 'Visibility in statute miles, common in US-style METARs.',
-        });
-        continue;
-      }
-
-      const weather = decodeMetarWeather(token);
-      if (weather) {
-        rows.push({
-          label: `Weather ${token}`,
-          value: weather,
-          hint: 'Weather group: intensity/proximity, descriptor, and phenomenon.',
-        });
-        continue;
-      }
-
-      const cloud = /^(FEW|SCT|BKN|OVC|NSC|NCD|VV)(\d{3}|\/\/\/)?(CB|TCU)?$/.exec(token);
-      if (cloud) {
-        const convective = cloud[3] === 'CB' ? ', cumulonimbus' : cloud[3] === 'TCU' ? ', towering cumulus' : '';
-        rows.push({
-          label: `Cloud ${token}`,
-          value: `${METAR_CLOUDS[cloud[1]] || cloud[1]}${cloud[2] ? ` at ${cloudHeight(cloud[2])}` : ''}${convective}`,
-          hint: 'Cloud cover amount and base height. Heights are hundreds of feet above aerodrome elevation.',
-        });
-        continue;
-      }
-
-      const temp = /^(M?\d{2})\/(M?\d{2})$/.exec(token);
-      if (temp) {
-        rows.push({
-          label: 'Temperature',
-          value: `${signedTemperature(temp[1])} C, dewpoint ${signedTemperature(temp[2])} C`,
-          hint: 'Temperature and dewpoint in Celsius. M means below zero.',
-        });
-        continue;
-      }
-
-      const qnh = /^Q(\d{4})$/.exec(token);
-      if (qnh) {
-        rows.push({
-          label: 'QNH',
-          value: `${Number(qnh[1])} hPa`,
-          hint: 'Altimeter setting in hectopascals.',
-        });
-        continue;
-      }
-
-      const altimeter = /^A(\d{4})$/.exec(token);
-      if (altimeter) {
-        rows.push({
-          label: 'Altimeter',
-          value: `${altimeter[1].slice(0, 2)}.${altimeter[1].slice(2)} inHg`,
-          hint: 'Altimeter setting in inches of mercury.',
-        });
-        continue;
       }
 
       if (token === 'NOSIG') {
@@ -406,7 +324,7 @@
         continue;
       }
 
-      unparsed.push(token);
+      appendConditionTokenRows(token, rows, unparsed);
     }
 
     if (unparsed.length) {
@@ -423,9 +341,7 @@
   function interpretTaf(raw) {
     // TAF is a forecast split into a base period plus change groups. The parser
     // keeps each change marker visible, then decodes the weather groups inside.
-    const text = String(raw || '').replace(/=$/, '').trim();
-    if (!text) return null;
-    const tokens = text.split(/\s+/);
+    const tokens = weatherTokens(raw);
     const rows = [];
     const unparsed = [];
     let index = 0;

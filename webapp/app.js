@@ -3170,6 +3170,20 @@ function renderMessages() {
   // cap this keeps the code simpler than maintaining incremental DOM state.
   const box = $('messages');
   const filtered = state.messages.filter(messageMatchesCurrentTab);
+  const view = `${state.filter}:${state.privatePeer || ''}`;
+  const previousTop = box.scrollTop;
+  const followLatest = box.dataset.chatView !== view
+    || !box.children.length
+    || box.scrollHeight - box.clientHeight - previousTop <= 24;
+  // Preserve the first surviving visible message, not just scrollTop: the
+  // bounded history may drop old rows, or transient messages may disappear.
+  const visibleIds = new Set(filtered.map(msg => msg.messageId));
+  const boxTop = box.getBoundingClientRect().top;
+  const anchor = followLatest ? null : [...box.children].find(row =>
+    visibleIds.has(row.dataset.chatMessageId) && row.getBoundingClientRect().bottom > boxTop);
+  const anchorOffset = anchor ? anchor.getBoundingClientRect().top - boxTop : 0;
+  const anchorId = anchor?.dataset.chatMessageId;
+  box.dataset.chatView = view;
   box.innerHTML = '';
   if (!filtered.length) {
     box.innerHTML = '<div class="empty">No messages.</div>';
@@ -3177,6 +3191,7 @@ function renderMessages() {
   }
   for (const msg of filtered) {
     const row = document.createElement('div');
+    row.dataset.chatMessageId = msg.messageId;
     const outgoing = msg.direction === 'outgoing';
     row.className = `msg ${outgoing ? 'outgoing' : msg.type || ''}${msg.fading ? ' fading' : ''}`;
     const date = new Date(msg.timestamp || Date.now());
@@ -3193,7 +3208,15 @@ function renderMessages() {
       ${weather}`;
     box.appendChild(row);
   }
-  box.scrollTop = box.scrollHeight;
+  if (followLatest) {
+    // First load and explicit tab changes still open at the newest message.
+    box.scrollTop = box.scrollHeight;
+  } else {
+    const restored = anchorId && [...box.children].find(row => row.dataset.chatMessageId === anchorId);
+    box.scrollTop = restored
+      ? box.scrollTop + restored.getBoundingClientRect().top - boxTop - anchorOffset
+      : previousTop;
+  }
 }
 
 function toggleWeatherInterpretation(messageId) {

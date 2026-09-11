@@ -12,7 +12,24 @@ for /f "tokens=2*" %%a in ('reg query "HKCU\Environment" /v PATH 2^>nul') do set
 where node >nul 2>&1
 if %errorlevel% neq 0 (
   echo  [ERROR] Node.js was not found.
-  echo  Download it from https://nodejs.org
+  echo  VoxHF requires Node.js 24 or newer.
+  echo  Install it with: winget install OpenJS.NodeJS.LTS
+  echo  If Winget is unavailable, download Node.js LTS from https://nodejs.org
+  echo  Close and reopen VoxHF after installation.
+  pause
+  exit /b 1
+)
+
+:: Fail early on an unsupported runtime, including when node_modules already
+:: exists and npm's engine check would otherwise be skipped.
+node -e "if (Number(process.versions.node.split('.')[0]) < 24) process.exit(1)"
+if errorlevel 1 (
+  echo  [ERROR] VoxHF requires Node.js 24 or newer.
+  echo  Current version:
+  node --version
+  echo  Update it with: winget upgrade OpenJS.NodeJS.LTS
+  echo  If Winget cannot update this installation, use https://nodejs.org or your Node version manager.
+  echo  Close and reopen VoxHF after updating.
   pause
   exit /b 1
 )
@@ -23,6 +40,7 @@ where ffmpeg >nul 2>&1
 if %errorlevel% neq 0 (
   echo  [ERROR] ffmpeg was not found in PATH.
   echo  Install it with: winget install Gyan.FFmpeg
+  echo  Close and reopen VoxHF after installation.
   pause
   exit /b 1
 )

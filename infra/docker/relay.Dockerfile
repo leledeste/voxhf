@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim AS deps
+FROM node:24-bookworm-slim AS deps
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ RUN apt-get update \
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-FROM node:20-bookworm-slim
+FROM node:24-bookworm-slim
 
 WORKDIR /app
 ENV NODE_ENV=production

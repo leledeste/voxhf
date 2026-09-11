@@ -11,7 +11,7 @@ feature and example.
 
 - Windows 10 or 11.
 - IVAO Altitude/PilotUI and PilotCore.
-- Node.js 20 or newer.
+- Node.js 24 or newer (24 LTS recommended).
 - ffmpeg with Speex encoding and decoding support.
 
 Install missing tools with Winget:
@@ -21,6 +21,14 @@ winget install OpenJS.NodeJS.LTS
 winget install Gyan.FFmpeg
 ```
 
+If the active Node.js version is older than 24, use
+`winget upgrade OpenJS.NodeJS.LTS`. The launcher displays the appropriate
+install/upgrade command and stops; it does not run Winget automatically.
+The Winget package follows the available LTS, while Node.js 24 remains the
+tested baseline. If Winget is unavailable or cannot match the existing Node
+installation, use the [official installer](https://nodejs.org) or your existing
+Node version manager. Close and reopen VoxHF after installing or updating.
+
 Open a new PowerShell window and verify them:
 
 ```powershell
@@ -29,7 +37,7 @@ ffmpeg -hide_banner -encoders | findstr speex
 ffmpeg -hide_banner -decoders | findstr speex
 ```
 
-The Node version must be 20 or newer and both ffmpeg searches must list Speex.
+The Node version must be 24 or newer and both ffmpeg searches must list Speex.
 
 ## Install From The Release ZIP
 
@@ -49,6 +57,14 @@ The Node version must be 20 or newer and both ffmpeg searches must list Speex.
 
 If Windows Firewall asks about Node.js, allow it only on the private network
 used by the simulator. Do not forward or publish VoxHF's local ports.
+
+TS2 voice servers use distinct loopback addresses on port `8767`, created by
+VoxHF as they are announced. Do not enter these addresses in PilotUI or add
+firewall/hosts-file rules for them: PilotUI still uses the printed simulator
+IPv4 address. After upgrading from the shared-address voice proxy, close and
+reopen PilotCore/Altitude as well as VoxHF to clear old voice destinations.
+Live compatibility testing for this unreleased routing change is described in
+[Voice Routing Diagnostics](VOICE_ROUTING_DIAGNOSTICS.md).
 
 `config.json` contains private settings and, in remote mode, an agent token.
 Never publish it. The `.voxhf-local` folder holds notification credentials and
@@ -135,6 +151,13 @@ triggers, iPhone/iPad installation, and the end-to-end Push test.
 
 ## Update
 
+When moving from Node.js 20 or 22, stop VoxHF, install Node.js 24 LTS, and open
+a new terminal. Confirm `node --version` before restarting. If reusing an
+existing installation folder, run `npm.cmd ci` there to reinstall the locked
+dependencies for the new runtime; this is especially important for source
+installations containing the native SQLite binding. Configuration and private
+notification state are not removed by `npm.cmd ci`.
+
 To check and stage a published Local update:
 
 ```powershell
@@ -145,6 +168,12 @@ npm.cmd run update:stage
 The updater verifies release metadata, ZIP size, and SHA-256, then extracts a
 new sibling folder. It copies `config.json` and private notification state but
 does not overwrite the running installation.
+
+Windows extraction uses the built-in Windows PowerShell Archive module. It
+also works when npm is launched from PowerShell 7: the updater isolates the
+child process's module search path without changing your shell, system settings,
+or execution policy. No extra Archive module installation is required on a
+standard supported Windows installation.
 
 1. Stop the old proxy.
 2. Start `start.bat` from the staged folder.

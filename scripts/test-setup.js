@@ -18,6 +18,24 @@ const template = fs.readFileSync(path.join(root, 'infra', 'docker', '.env.exampl
 const defaults = fs.readFileSync(path.join(root, 'infra', 'docker', 'defaults.env'), 'utf8');
 const compose = fs.readFileSync(path.join(root, 'infra', 'docker', 'docker-compose.yml'), 'utf8');
 
+// Launcher prerequisites remain user-managed: suggest targeted commands without
+// installing/upgrading global software or accepting its agreements automatically.
+const launcher = fs.readFileSync(path.join(root, 'start.bat'), 'utf8');
+const missingNode = launcher.slice(launcher.indexOf('where node'), launcher.indexOf(':: Fail early'));
+const oldNode = launcher.slice(launcher.indexOf(':: Fail early'), launcher.indexOf(':: ffmpeg'));
+const missingFfmpeg = launcher.slice(launcher.indexOf('where ffmpeg'), launcher.indexOf(':: Install the exact'));
+assert.ok(missingNode.includes('echo  Install it with: winget install OpenJS.NodeJS.LTS'));
+assert.ok(oldNode.includes("< 24"));
+assert.ok(oldNode.includes('echo  Update it with: winget upgrade OpenJS.NodeJS.LTS'));
+assert.ok(missingFfmpeg.includes('echo  Install it with: winget install Gyan.FFmpeg'));
+for (const line of launcher.split(/\r?\n/)) {
+  if (line.trim().startsWith('::')) continue;
+  if (/winget\s+(?:install|upgrade)\b/i.test(line)) {
+    assert.match(line.trim(), /^echo\s/i, 'Winget commands must only be displayed');
+  }
+}
+assert.ok(!launcher.includes('--accept-package-agreements'));
+
 assert.strictEqual(normalizeFlow('LOCAL'), 'local');
 assert.strictEqual(normalizeFlow('unknown'), '');
 assert.strictEqual(validateDomain('example.com'), '');

@@ -45,7 +45,7 @@ The visual setup page is also available at [voxhf.com/setup](https://voxhf.com/s
 
 ## Local Quick Start
 
-Requirements: Windows 10/11, IVAO Altitude, Node.js 20 or newer, and ffmpeg
+Requirements: Windows 10/11, IVAO Altitude, Node.js 24 or newer (24 LTS recommended), and ffmpeg
 with Speex support.
 
 ```powershell

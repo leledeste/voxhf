@@ -13,7 +13,7 @@ open-source licenses.
 
 ### SimpleWebAuthn
 
-- Packages: `@simplewebauthn/server` 13.3.1 and `@simplewebauthn/browser` 13.2.0
+- Packages: `@simplewebauthn/server` 13.3.2 and `@simplewebauthn/browser` 13.2.0
 - Purpose: standards-based WebAuthn/passkey option generation, browser
   interaction, and cryptographic response verification for optional admin MFA.
 - License: MIT

@@ -46,6 +46,7 @@ const requiredFiles = [
   'proxy/fsd-proxy.js',
   'proxy/fsd-parser.js',
   'proxy/local-web-server.js',
+  'scripts/test-local-web-server.js',
   'proxy/push-notifications.js',
   'proxy/unicom-timer.js',
   'proxy/ogg-speex.js',
@@ -56,6 +57,9 @@ const requiredFiles = [
   'proxy/socket-utils.js',
   'proxy/static-web.js',
   'proxy/ts2-voice-proxy.js',
+  'proxy/ts2-voice-router.js',
+  'scripts/test-ts2-routing.js',
+  'scripts/test-ts2-loopback.js',
   'proxy/web-tx.js',
   'proxy/websocket-commands.js',
   'apps/relay/index.js',
@@ -103,6 +107,11 @@ const requiredFiles = [
   'scripts/test-local-update.js',
   'scripts/test-chat-history.js',
   'scripts/test-fsd-disconnect.js',
+  'scripts/test-fsd-stream.js',
+  'scripts/test-ts2-dns.js',
+  'proxy/voice-route-trace.js',
+  'scripts/test-voice-route-trace.js',
+  'scripts/test-weather.js',
   'scripts/test-web-tx.js',
   'scripts/test-push-notifications.js',
   'scripts/test-unicom-timer.js',
@@ -110,6 +119,7 @@ const requiredFiles = [
   'scripts/relay-db-user.js',
   'scripts/relay-backup.js',
   'scripts/test-relay-backup.js',
+  'scripts/test-server-update.js',
   'scripts/test-relay-db.js',
   'scripts/test-relay-db-auth.js',
   'scripts/test-relay-db-user.js',
@@ -670,6 +680,7 @@ check('proxy config syntax', () => checkNodeSyntax('proxy/config.js'));
 check('proxy FSD proxy syntax', () => checkNodeSyntax('proxy/fsd-proxy.js'));
 check('proxy fsd parser syntax', () => checkNodeSyntax('proxy/fsd-parser.js'));
 check('proxy local web server syntax', () => checkNodeSyntax('proxy/local-web-server.js'));
+check('local web server test syntax', () => checkNodeSyntax('scripts/test-local-web-server.js'));
 check('proxy push notifications syntax', () => checkNodeSyntax('proxy/push-notifications.js'));
 check('proxy UNICOM timer syntax', () => checkNodeSyntax('proxy/unicom-timer.js'));
 check('proxy ogg-speex syntax', () => checkNodeSyntax('proxy/ogg-speex.js'));
@@ -680,6 +691,9 @@ check('proxy remote agent syntax', () => checkNodeSyntax('proxy/remote-agent.js'
 check('proxy socket utils syntax', () => checkNodeSyntax('proxy/socket-utils.js'));
 check('proxy static web syntax', () => checkNodeSyntax('proxy/static-web.js'));
 check('proxy TS2 voice proxy syntax', () => checkNodeSyntax('proxy/ts2-voice-proxy.js'));
+check('proxy TS2 voice router syntax', () => checkNodeSyntax('proxy/ts2-voice-router.js'));
+check('TS2 routing test syntax', () => checkNodeSyntax('scripts/test-ts2-routing.js'));
+check('TS2 loopback test syntax', () => checkNodeSyntax('scripts/test-ts2-loopback.js'));
 check('proxy web tx syntax', () => checkNodeSyntax('proxy/web-tx.js'));
 check('proxy websocket commands syntax', () => checkNodeSyntax('proxy/websocket-commands.js'));
 check('relay syntax', () => checkNodeSyntax('apps/relay/index.js'));
@@ -704,6 +718,11 @@ check('local updater syntax', () => checkNodeSyntax('scripts/update-local.js'));
 check('local updater test syntax', () => checkNodeSyntax('scripts/test-local-update.js'));
 check('chat history test syntax', () => checkNodeSyntax('scripts/test-chat-history.js'));
 check('FSD disconnect test syntax', () => checkNodeSyntax('scripts/test-fsd-disconnect.js'));
+check('FSD stream test syntax', () => checkNodeSyntax('scripts/test-fsd-stream.js'));
+check('TS2 DNS test syntax', () => checkNodeSyntax('scripts/test-ts2-dns.js'));
+check('voice routing trace syntax', () => checkNodeSyntax('proxy/voice-route-trace.js'));
+check('voice routing trace test syntax', () => checkNodeSyntax('scripts/test-voice-route-trace.js'));
+check('weather decoder test syntax', () => checkNodeSyntax('scripts/test-weather.js'));
 check('Web TX readiness test syntax', () => checkNodeSyntax('scripts/test-web-tx.js'));
 check('push notification test syntax', () => checkNodeSyntax('scripts/test-push-notifications.js'));
 check('UNICOM timer test syntax', () => checkNodeSyntax('scripts/test-unicom-timer.js'));
@@ -711,6 +730,7 @@ check('relay agent watchdog test syntax', () => checkNodeSyntax('scripts/test-ag
 check('relay database user helper syntax', () => checkNodeSyntax('scripts/relay-db-user.js'));
 check('relay backup syntax', () => checkNodeSyntax('scripts/relay-backup.js'));
 check('relay backup test syntax', () => checkNodeSyntax('scripts/test-relay-backup.js'));
+check('server update test syntax', () => checkNodeSyntax('scripts/test-server-update.js'));
 check('relay db migration syntax', () => checkNodeSyntax('scripts/test-relay-db.js'));
 check('relay db auth syntax', () => checkNodeSyntax('scripts/test-relay-db-auth.js'));
 check('relay db user test syntax', () => checkNodeSyntax('scripts/test-relay-db-user.js'));
@@ -725,7 +745,13 @@ check('remote protocol syntax', () => checkNodeSyntax('packages/protocol/index.j
 check('remote protocol rules', checkRemoteProtocol);
 check('chat history behavior', () => runNodeScript('scripts/test-chat-history.js'));
 check('FSD disconnect notification policy', () => runNodeScript('scripts/test-fsd-disconnect.js'));
+check('FSD stream framing and voice rewriting', () => runNodeScript('scripts/test-fsd-stream.js'));
+check('TS2 DNS ordering and routing', () => runNodeScript('scripts/test-ts2-dns.js'));
+check('voice routing isolation', () => runNodeScript('scripts/test-ts2-routing.js'));
+check('voice local endpoint transports', () => runNodeScript('scripts/test-ts2-loopback.js'));
+check('voice routing trace parity and privacy', () => runNodeScript('scripts/test-voice-route-trace.js'));
 check('Web TX readiness across UDP flows', () => runNodeScript('scripts/test-web-tx.js'));
+check('local WebSocket error isolation', () => runNodeScript('scripts/test-local-web-server.js'));
 check('push notification behavior', () => runNodeScript('scripts/test-push-notifications.js'));
 check('UNICOM three-minute timer behavior', () => runNodeScript('scripts/test-unicom-timer.js'));
 check('relay agent-offline watchdog behavior', () => runNodeScript('scripts/test-agent-watchdog.js'));
@@ -734,9 +760,11 @@ check('setup configuration generation', () => runNodeScript('scripts/test-setup.
 check('relay database auth', () => runNodeScript('scripts/test-relay-db-auth.js'));
 check('relay database user helper', () => runNodeScript('scripts/test-relay-db-user.js'));
 check('relay backup and restore', () => runNodeScript('scripts/test-relay-backup.js'));
+check('server update backup failure handling', () => runNodeScript('scripts/test-server-update.js'));
 check('relay admin api', () => runNodeScript('scripts/test-relay-admin.js'));
 check('relay account api', () => runNodeScript('scripts/test-relay-account.js'));
 check('webapp browser-state regressions', () => runNodeScript('scripts/test-webapp-regressions.js'));
+check('METAR and TAF interpretation', () => runNodeScript('scripts/test-weather.js'));
 check('proxy privacy guards', checkProxyPrivacyGuards);
 check('hosted security guards', checkHostedSecurityGuards);
 check('dependency licenses', checkDependencyLicenses);

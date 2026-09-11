@@ -431,9 +431,12 @@ cd /opt/voxhf
 infra/docker/voxhf-server.sh update
 ```
 
-The command creates a pre-update database backup, performs a fast-forward pull,
-rebuilds the stack, waits for health, and records the previous commit/backup.
-It refuses to overwrite tracked local changes.
+The command creates and verifies a pre-update database backup, performs a
+fast-forward pull, rebuilds the stack, waits for health, and records the previous
+commit/backup. If creating or verifying the backup fails, it stops before the
+pull or rebuild and leaves the existing rollback record unchanged. It also
+refuses to overwrite tracked local changes. Resolve the reported backup error
+(for example disk space, permissions, or an unavailable relay) before retrying.
 
 If the new deployment fails validation:
 
@@ -445,6 +448,11 @@ Rollback intentionally restores both the previous source commit and its
 pre-update database. Private `.env` values and Docker volumes are not stored in
 Git. The first adoption of this workflow has no earlier rollback record, so use
 the provider snapshot for that one upgrade.
+
+When the relay is running, rollback first creates and verifies a safety backup
+of the current database; failure cancels rollback before stopping the relay or
+restoring data. If the relay is already stopped, rollback uses the recorded
+pre-update backup as before.
 
 For OS and Docker security updates:
 

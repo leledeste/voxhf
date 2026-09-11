@@ -65,10 +65,27 @@ function createLocalWebServer(options) {
     // A new browser gets a compact snapshot of current state plus recent
     // messages. Live updates then arrive through sendJson() or binary PCM.
     wsClients.add(ws);
-    ws.send(JSON.stringify(options.makeInitPayload()));
     ws.rate = { windowStartMs: Date.now(), messages: 0 };
 
+    function cleanup(reason) {
+      // Remove first: error/close can arrive back-to-back, and queued messages
+      // must not restart TX while this socket is still shutting down.
+      if (!wsClients.delete(ws)) return false;
+      options.stopWebTx(ws, reason);
+      return true;
+    }
+
+    ws.on('close', () => cleanup('webapp closed'));
+    ws.on('error', () => {
+      if (!wsClients.has(ws)) return;
+      // Log no error payload: protocol errors can contain client-provided text.
+      logger.warn('[WS] Local webapp connection failed; closing this client.');
+      try { cleanup('webapp connection error'); }
+      finally { ws.terminate(); }
+    });
+
     ws.on('message', (raw) => {
+      if (!wsClients.has(ws)) return;
       const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
       if (buf.slice(0, 4).toString('ascii') === 'CTX1') {
         options.writeWebTxPcm(ws, buf.slice(4));
@@ -86,10 +103,8 @@ function createLocalWebServer(options) {
       }
     });
 
-    ws.on('close', () => {
-      options.stopWebTx(ws, 'webapp closed');
-      wsClients.delete(ws);
-    });
+    // Install lifecycle handlers before sending anything to the new socket.
+    ws.send(JSON.stringify(options.makeInitPayload()));
   });
 
   function isAllowedLocalWebOrigin(origin) {

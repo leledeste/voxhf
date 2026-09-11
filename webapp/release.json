@@ -1,8 +1,8 @@
 {
-  "latestVersion": "0.1.2-beta.2",
-  "recommendedLocalVersion": "0.1.2-beta.2",
+  "latestVersion": "0.1.2-beta.3",
+  "recommendedLocalVersion": "0.1.2-beta.3",
   "minimumLocalVersion": "0.1.2-beta.2",
-  "artifactsUrl": "https://github.com/leledeste/voxhf/releases/download/v0.1.2-beta.2/release-artifacts.json",
-  "downloadUrl": "https://github.com/leledeste/voxhf/releases/tag/v0.1.2-beta.2",
-  "notesUrl": "https://github.com/leledeste/voxhf/releases/tag/v0.1.2-beta.2"
+  "artifactsUrl": "https://github.com/leledeste/voxhf/releases/download/v0.1.2-beta.3/release-artifacts.json",
+  "downloadUrl": "https://github.com/leledeste/voxhf/releases/tag/v0.1.2-beta.3",
+  "notesUrl": "https://github.com/leledeste/voxhf/releases/tag/v0.1.2-beta.3"
 }

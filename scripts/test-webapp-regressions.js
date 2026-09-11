@@ -106,7 +106,8 @@ class FakeElement {
     this.title = '';
     this.href = '';
     this.type = '';
-    this.scrollTop = 0;
+    this._scrollTop = 0;
+    this.clientHeight = 200;
     this.listeners = new Map();
   }
 
@@ -128,10 +129,25 @@ class FakeElement {
       child.parentNode = null;
     });
     this.children = [];
+    this._scrollTop = 0;
   }
 
   get scrollHeight() {
-    return Math.max(0, this.children.length * 40);
+    return Math.max(this.clientHeight, this.children.length * 40);
+  }
+
+  get scrollTop() { return this._scrollTop; }
+
+  set scrollTop(value) {
+    this._scrollTop = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight));
+  }
+
+  getBoundingClientRect() {
+    const parent = this.parentNode;
+    const top = parent
+      ? parent.getBoundingClientRect().top + parent.children.indexOf(this) * 40 - parent.scrollTop
+      : 0;
+    return { top, bottom: top + 40 };
   }
 
   get options() {
@@ -537,6 +553,92 @@ test('chat history survives duplicate recovery and closing a private tab', () =>
 
   app.setActiveChatFilter('all');
   assert.strictEqual(app.state.messages.filter(app.messageMatchesCurrentTab).length, 3);
+});
+
+test('chat follows the bottom but preserves a scrolled reading position', () => {
+  const { app, document } = createHarness();
+  const box = document.getElementById('messages');
+  const add = index => app.addMessage({
+    kind: 'message', type: 'system', messageId: `scroll-${index}`, text: `Message ${index}`,
+  });
+  for (let i = 0; i < 20; i += 1) add(i);
+  assert.strictEqual(box.scrollTop, box.scrollHeight - box.clientHeight, 'initial history opens at bottom');
+  box.scrollTop = 135;
+  const anchorId = box.children[3].dataset.chatMessageId;
+  const top = box.children[3].getBoundingClientRect().top;
+  add(20);
+  assert.strictEqual(box.scrollTop, 135);
+  assert.strictEqual(box.children.find(row => row.dataset.chatMessageId === anchorId).getBoundingClientRect().top, top);
+
+  // An unchanged COM update also re-renders chat and must not reset reading.
+  app.setComLabel(1, '122.800');
+  assert.strictEqual(box.scrollTop, 135);
+  box.scrollTop = box.scrollHeight - box.clientHeight - 10;
+  add(21);
+  assert.strictEqual(box.scrollTop, box.scrollHeight - box.clientHeight, 'near-bottom follows new traffic');
+});
+
+test('chat keeps its message anchor when bounded history drops old rows', () => {
+  const { app, document } = createHarness();
+  app.state.messages = Array.from({ length: 400 }, (_, index) => ({
+    kind: 'message', type: 'system', messageId: `bounded-${index}`, text: `Message ${index}`,
+  }));
+  app.setActiveChatFilter('all');
+  const box = document.getElementById('messages');
+  box.scrollTop = 215;
+  const anchor = box.children[5];
+  const offset = anchor.getBoundingClientRect().top;
+  app.addMessage({ kind: 'message', type: 'system', messageId: 'new', text: 'New message' });
+  assert.strictEqual(app.state.messages.length, 400);
+  assert.strictEqual(box.scrollTop, 175, 'scroll compensates for removed first row');
+  assert.strictEqual(box.children.find(row => row.dataset.chatMessageId === anchor.dataset.chatMessageId).getBoundingClientRect().top, offset);
+});
+
+test('chat preserves surviving rows after removals and clamps an empty view', () => {
+  const { app, document } = createHarness();
+  app.state.messages = Array.from({ length: 20 }, (_, index) => ({
+    kind: 'message', type: 'system', messageId: `removed-${index}`, text: `Message ${index}`,
+  }));
+  app.setActiveChatFilter('all');
+  const box = document.getElementById('messages');
+  box.scrollTop = 215;
+  const nextRowId = box.children[6].dataset.chatMessageId;
+  const nextRowTop = box.children[6].getBoundingClientRect().top;
+  // Simulate expiry above the viewport and removal of the first visible row.
+  app.state.messages = app.state.messages.filter((_, index) => index !== 0 && index !== 5);
+  app.setComLabel(1, '122.800');
+  assert.strictEqual(box.children.find(row => row.dataset.chatMessageId === nextRowId).getBoundingClientRect().top, nextRowTop);
+  app.state.messages = [];
+  app.setComLabel(1, '122.800');
+  assert.strictEqual(box.scrollTop, 0);
+  assert.match(box.innerHTML, /No messages/);
+});
+
+test('chat filtering preserves reading unless a different tab is selected', () => {
+  const { app, document } = createHarness();
+  app.state.messages = Array.from({ length: 30 }, (_, index) => ({
+    kind: 'message', type: index % 2 ? 'private' : 'system',
+    messageId: `filter-${index}`, privatePeer: 'TEST_TWR', text: `Message ${index}`,
+  }));
+  app.setActiveChatFilter('all');
+  const box = document.getElementById('messages');
+  box.scrollTop = 100;
+  app.setActiveChatFilter('system');
+  assert.strictEqual(box.scrollTop, box.scrollHeight - box.clientHeight);
+  box.scrollTop = 100;
+  app.addMessage({ kind: 'message', type: 'private', sender: 'OTHER_TWR', messageId: 'hidden', text: 'Hidden' });
+  assert.strictEqual(box.scrollTop, 100, 'filtered-out traffic must not move the viewport');
+  app.setActiveChatFilter('system');
+  assert.strictEqual(box.scrollTop, 100, 'clicking the same tab preserves reading');
+  app.setActiveChatFilter('private-peer', 'TEST_TWR');
+  assert.strictEqual(box.scrollTop, box.scrollHeight - box.clientHeight);
+  box.scrollTop = 100;
+  app.closePrivateChat('TEST_TWR');
+  assert.strictEqual(box.scrollTop, box.scrollHeight - box.clientHeight, 'closing the active peer opens Private at bottom');
+  assert.strictEqual(app.state.messages.length, 31);
+  app.setActiveChatFilter('frequency');
+  app.addMessage({ kind: 'message', type: 'frequency', messageId: 'first-frequency', text: 'First' });
+  assert.strictEqual(box.scrollTop, 0, 'empty and short views stay at the top');
 });
 
 test('frequency chat keeps UNICOM and active COM traffic only', () => {

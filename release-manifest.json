@@ -6,7 +6,7 @@
       "description": "Local agent, local webapp, and configuration for normal Altitude use.",
       "installDocument": "docs/INSTALL_LOCAL.md",
       "quickStart": [
-        "Install Node.js 20+ and ffmpeg.",
+        "Install Node.js 24 LTS (minimum 24) and ffmpeg.",
         "Extract the ZIP and double-click start.bat."
       ],
       "packageJson": {

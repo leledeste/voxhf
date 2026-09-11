@@ -153,7 +153,8 @@ mechanical replacement.
 
 ## Verification
 
-Use Node.js 20 or newer. Before handing off any code change, run:
+Use Node.js 24 LTS as the tested baseline (minimum Node.js 24). Before handing
+off any code change, run:
 
 ```powershell
 npm.cmd run verify

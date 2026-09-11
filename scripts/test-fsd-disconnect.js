@@ -57,8 +57,7 @@ function proxyOptions(remotePort, events) {
     logger,
     timestamp: () => new Date().toISOString(),
     getHost: () => '127.0.0.1',
-    getLanIp: () => '127.0.0.1',
-    onVoiceServer() {},
+    getVoiceEndpoint: () => '127.0.0.1',
     onConnected: () => events.push({ type: 'connected' }),
     onClose: meta => events.push({ type: 'closed', ...meta }),
   };

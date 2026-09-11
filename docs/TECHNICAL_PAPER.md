@@ -67,7 +67,7 @@ flowchart TD
   Agent -->|"4827 forwarded traffic"| PilotCore["Altitude PilotCore"]
   PilotCore -->|"FSD connection redirected to 127.0.0.1:6809"| Agent
   Agent -->|"6809 proxied TCP"| IVAO["Real IVAO FSD server"]
-  PilotCore -->|"TS2 voice redirected to local IP:8767"| Agent
+  PilotCore -->|"TS2 voice via per-server loopback IP:8767"| Agent
   Agent -->|"8767 UDP/TCP proxied voice"| TS2["Real IVAO TS2 voice server"]
   Browser["Browser webapp"] <-->|"HTTP + WebSocket on localhost:3000"| Agent
 ```
@@ -97,13 +97,19 @@ focused modules:
   port, FSD host rewrite, COM state learning, and synthetic PilotUI TX feedback.
 - `proxy/fsd-proxy.js`: FSD TCP proxying on `127.0.0.1:6809`, parsed
   chat/weather/ATIS/flight-plan events, and VOICE host rewrite.
-- `proxy/ts2-voice-proxy.js`: TS2 TCP/UDP proxying on `0.0.0.0:8767` and RX
+- `proxy/ts2-voice-router.js`: bounded, stable per-server loopback endpoints on
+  port `8767`, advertised only after both TCP and UDP listeners are ready.
+- `proxy/ts2-voice-proxy.js`: fixed-endpoint TS2 TCP/UDP forwarding and RX
   voice decoding side-tap for the browser.
 - `proxy/web-tx.js`: browser microphone encoding, local monitor, TS2 transmit
   packet shaping, and cached Altitude TX session usage.
 - `proxy/local-web-server.js`: static local webapp server, `/ws` control
   channel, local origin checks, command dispatch, test tone, and browser RX
   fan-out.
+  Per-client error/close cleanup stops that browser's TX once and removes it
+  before queued commands or PCM can be processed. An errored socket is
+  terminated without disconnecting healthy browsers; diagnostics omit the
+  client-provided error payload. Lifecycle handlers precede the init snapshot.
 - `proxy/app-state.js`: callsign, connection state, radio state, XPDR state,
   flight-plan state, station snapshots, own position, recent flight telemetry,
   and bounded message history.
@@ -185,6 +191,14 @@ When PilotCore receives an IVAO FSD endpoint, VoxHF rewrites the endpoint to
 `127.0.0.1`. PilotCore then connects to VoxHF's local FSD proxy, and VoxHF
 connects onward to the real IVAO FSD server.
 
+Incoming records are buffered as bytes until LF before parsing and VOICE host
+rewriting. TCP chunk boundaries must not affect the forwarded result. Unrelated
+bytes, empty records, and CRLF/LF endings are preserved; only a matched VOICE
+host is replaced. The unfinished tail belongs to its connection and is discarded
+on close. A record exceeding 64 KiB before LF closes the connection without
+logging its contents, bounding memory if an upstream delimiter is missing.
+Outgoing PilotCore traffic continues to be forwarded immediately.
+
 VoxHF parses FSD traffic for:
 
 - Connection and callsign state.
@@ -206,6 +220,14 @@ voice traffic through VoxHF.
 
 VoxHF forwards TS2 traffic to the real server and inspects the packet class
 needed for voice receive and transmit session caching.
+
+The cached IPv4 target accepts results only from the latest DNS request for
+that proxy instance. A request generation, rather than a hostname comparison,
+also rejects stale answers after A -> B -> A changes or overlapping refreshes
+of the same hostname. Changing the hostname clears the cached address;
+pending/failed resolution falls back to the current hostname. A failed refresh
+of an unchanged hostname retains its previously accepted address. This guard
+does not change FSD server selection, reset policy, codecs, or audio processing.
 
 ## 6. Radio and Station Model
 
@@ -330,24 +352,44 @@ changes. If a usable session cannot be derived, one physical Altitude PTT press
 remains the explicit fallback. This observed private protocol remains part of
 live regression testing.
 
-Altitude can expose more than one local TS2 UDP source port during voice setup
-and keepalive traffic. VoxHF ignores unrelated packets from alternate ports and
-changes the active TX seed only after recognizing a valid setup or native voice
-packet. The replacement is atomic: readiness stays available while the seed is
-switched, but an active browser transmission is stopped before it can continue
-on a different TS2 session. FSD close, voice-server reset, and closure of the
-UDP client that owns the current seed still invalidate readiness.
-
 FSD can advertise several nearby controllers on different regional TS2 servers
-in quick succession. VoxHF deliberately does not filter those VOICE replies by
-the COM station currently shown in the browser or local agent state. PilotCore
-radio updates and FSD voice discovery are asynchronous, so the displayed
-station can lag behind the channel Altitude is preparing. A filter based on
-that UI-facing state was evaluated and rejected because it could leave part of
-the join traffic outside the proxy and make voice-channel connections
-intermittent. Channel routing therefore keeps following the observed FSD/TS2
-session, while readiness stabilization stays at the validated UDP seed boundary
-where no radio-state guess is required.
+in quick succession. Discovery now allocates a stable, distinct loopback address
+per server instead of replacing one global target. Channels on the same host
+share an endpoint. Altitude selects the destination by connecting to the
+advertised address; no browser COM filter or inferred PilotCore station is used.
+Both listeners must be ready before forwarding a rewritten VOICE record. FSD
+ordering is preserved while binding, with bounded pending input. A failed or
+unsupported endpoint withholds only its VOICE reply, not the flight connection,
+and never falls back to bypassing the proxy.
+
+At most 32 server endpoints exist per proxy process. Hosts must match the IVAO
+regional TS2 hostname format. Addresses are deterministically derived from the
+normalized hostname in the `127.64.0.0` to `127.127.255.255` loopback range, with
+collisions rejected rather than reassigned. This preserves cached destination
+identity across restarts. No OS network configuration is changed. Listeners
+bind only to loopback and accept only local sources. Each UDP side socket pins
+its destination; a discovery or subsequent DNS result cannot retarget it.
+
+Observed outbound TS2 login packets (`BEF4/0003`) select the browser audio route
+and invalidate the previous TX seed. The new route must provide a setup packet
+before keepalives can seed Web TX. Other routes still forward their native
+traffic but cannot supply browser RX or reclaim TX via stale ACKs/keepalives.
+Alternate UDP source ports on the active server are accepted for Web TX only
+when their session bytes match the setup learned from the current login.
+Each browser TX session also owns its encoder callbacks: delayed output or exit
+from a stopped encoder cannot queue audio or stop a replacement PTT session.
+Closing its local monitor suppresses buffered PCM, even if the browser remains
+connected. The active encoder's exit still stops and cleans up its own session.
+Same-server channel changes retain the native session. FSD close and closure
+of the active UDP side socket invalidate readiness. Delayed PCM/exit events
+from an old RX decoder cannot affect its replacement.
+
+This private-protocol behavior requires live regression testing. In particular,
+the Windows local smoke test supports automatic/loopback source binding, but a
+separate probe with an explicitly LAN-bound UDP source did not receive a reply.
+Altitude's binding and cross-server reconnection must therefore be validated
+before release; simulated Ready state is not proof of a successful join. See
+[Voice Routing Diagnostics](VOICE_ROUTING_DIAGNOSTICS.md).
 
 ## 10. Remote Access Architecture
 
@@ -526,7 +568,7 @@ The complete implemented controls and residual trust are maintained in the
 
 ## 12. Technology And Verification Boundaries
 
-VoxHF uses Node.js 20+, native TCP/UDP/HTTP/process APIs, `ws`, a dependency-free
+VoxHF uses Node.js 24+ (24 LTS is the tested baseline), native TCP/UDP/HTTP/process APIs, `ws`, a dependency-free
 static webapp, browser Web Audio/`getUserMedia`, ffmpeg for Speex, SQLite for
 relay control-plane records, and Docker Compose/Caddy for production hosting.
 The exact dependency inventory is in `package.json` and

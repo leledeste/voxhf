@@ -2,7 +2,55 @@
 
 All notable VoxHF changes are recorded here.
 
-## Unreleased
+## 0.1.2-beta.3 - 2026-09-11
+
+### Added
+
+- Added an opt-in, bounded local `--trace-voice-routing` diagnostic for
+  investigating VOICE-discovery routing changes, without dumping packet bodies,
+  audio, or TS2 session identifiers.
+
+### Fixed
+
+- Isolated local webapp WebSocket errors: stop the affected browser's TX,
+  remove and terminate its connection once, and ignore queued commands/PCM
+  without interrupting other browsers.
+- Prevented delayed exits and buffered output from a stopped Web TX encoder
+  from interrupting a replacement transmission or leaking old monitor audio.
+- Isolated TS2 servers behind distinct, stable local loopback endpoints so
+  background VOICE discovery no longer retargets an active UDP session. Browser
+  RX/TX follows the observed login on that endpoint; old-route packets cannot
+  reclaim Web TX.
+- Ignored obsolete TS2 DNS responses after a voice-server change or a newer
+  lookup, preventing delayed results from replacing the current routing target.
+- Fixed Local update extraction launched through Node/npm from PowerShell 7
+  by isolating Windows PowerShell's module search path, without changing the
+  user's environment or execution policy.
+- Corrected METAR/TAF mixed-fraction visibility, visibility below 50 metres
+  (`0000`), and corrected METAR/SPECI headers, including Route weather delivery.
+  Shared condition decoding now supports MPS wind, gusts, variable/calm wind
+  with rounded knot equivalents, and M/P statute-mile visibility limits.
+- Stopped managed server updates and running-relay rollbacks when their safety
+  backup cannot be created or verified, preserving existing rollback metadata
+  and keeping backup diagnostic output separate from the recorded filename.
+- Preserved the chat reading position when messages arrive or old entries are
+  removed, while continuing to follow new messages when already near the bottom.
+- Kept voice-server replies routed through the local proxy when TCP splits a
+  reply across chunks, preserving unrelated FSD bytes and line endings.
+
+### Changed
+
+- Clarified Windows startup guidance: show the Winget install command when
+  Node.js is missing and the upgrade command when it is older than 24, while
+  retaining the FFmpeg install command. Prerequisite installation remains manual.
+- Raised the minimum Node.js runtime to 24, using Node.js 24 LTS in Docker,
+  server setup, and CI/release workflows; updated installation instructions
+  and GitHub Actions to their Node.js 24-based v5 releases.
+
+### Security
+
+- Updated `@simplewebauthn/server` to 13.3.2 to address attestation certificate
+  chain validation advisory GHSA-6hxq-p678-4hr2.
 
 ## 0.1.2-beta.2 - 2026-09-02
 

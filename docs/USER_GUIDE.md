@@ -160,6 +160,11 @@ browser never receives a raw FSD command tunnel.
 
 ### Session History
 
+Chat follows new messages while you are at or near the bottom. Scroll up to
+read earlier messages without being pulled back down by incoming traffic;
+scroll to the bottom to resume following. Selecting a different chat tab opens
+its latest messages.
+
 The local proxy keeps up to 200 recent typed chat events in memory. It sends
 that history to every connected local or remote browser after a refresh,
 reconnect, or device change. Notification permission is not required.
@@ -199,6 +204,14 @@ local agent, so another connected browser sees the same current weather state.
 Select **Interpret** to expand the built-in plain-language explanation. Treat
 the raw report as authoritative; the interpretation is a convenience and may
 not cover every aviation-weather abbreviation or edge case.
+
+Both METAR and TAF interpretation support wind in knots or metres per second.
+For example, `12007MPS` is wind from 120 degrees at 7 m/s (about 14 kt);
+gusts are converted separately. Visibility `1 1/2SM` remains one and a half
+statute miles, `M1/4SM` means less than a quarter mile, and `0000` means less
+than 50 metres. Corrected METAR/SPECI and amended/corrected TAF headers are
+recognized. Unknown groups remain under **Not interpreted**; supplementary
+`RMK` text stays together under **Remarks**.
 
 For an airport outside the flight plan, use `.metar`, `.taf`, or `.atis` in the
 message box.

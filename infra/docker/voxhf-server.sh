@@ -55,27 +55,31 @@ wait_for_health() {
 }
 
 backup_named() {
+  # stdout is the machine-readable filename only. Check each command explicitly:
+  # callers may test this function in an if/! context, which disables set -e.
   label=$1
-  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  stamp=$(date -u +%Y%m%dT%H%M%SZ) || return 1
   name="voxhf-${label}-${stamp}.db"
-  host_dir=$(backup_dir)
-  mkdir -p "$host_dir"
+  host_dir=$(backup_dir) || return 1
+  mkdir -p "$host_dir" || return 1
   if ! compose exec -T voxhf-relay test -f /app/scripts/relay-backup.js; then
     # The first upgrade from an older VoxHF image predates this helper. Copying
     # it into the disposable running container lets us back up before rebuild.
-    compose exec -T voxhf-relay mkdir -p /app/scripts
-    compose cp "$ROOT/scripts/relay-backup.js" voxhf-relay:/app/scripts/relay-backup.js
+    compose exec -T voxhf-relay mkdir -p /app/scripts >&2 || return 1
+    compose cp "$ROOT/scripts/relay-backup.js" voxhf-relay:/app/scripts/relay-backup.js >&2 || return 1
   fi
   compose exec -T voxhf-relay node scripts/relay-backup.js backup \
     --db /var/lib/voxhf-relay/voxhf.db \
-    --output "/var/backups/voxhf/$name"
+    --output "/var/backups/voxhf/$name" >&2 || return 1
+  compose exec -T voxhf-relay node scripts/relay-backup.js verify \
+    "/var/backups/voxhf/$name" >&2 || return 1
   printf '%s\n' "$name"
 }
 
 command_setup() {
   command -v docker >/dev/null 2>&1 || fail 'Docker is required.'
   [ ! -f "$ENV_FILE" ] || fail "$ENV_FILE already exists. Move it first to regenerate configuration."
-  docker run --rm -it -v "$ROOT:/app" -w /app node:20-bookworm-slim node scripts/setup.js server
+  docker run --rm -it -v "$ROOT:/app" -w /app node:24-bookworm-slim node scripts/setup.js server
   echo "[OK] Created $ENV_FILE"
 }
 
@@ -103,7 +107,7 @@ command_start() {
 
 command_backup() {
   require_env
-  backup_named manual >/dev/null
+  backup_named manual >/dev/null || fail 'Database backup failed.'
   echo "[OK] Backup directory: $(backup_dir)"
 }
 
@@ -142,7 +146,9 @@ command_update() {
   require_env
   require_clean_git
   previous=$(git -C "$ROOT" rev-parse HEAD)
-  backup=$(backup_named before-update | tail -n 1)
+  if ! backup=$(backup_named before-update); then
+    fail 'Database backup failed; update cancelled before git pull.'
+  fi
   git -C "$ROOT" pull --ff-only
   current=$(git -C "$ROOT" rev-parse HEAD)
   printf '%s\n%s\n%s\n' "$previous" "$current" "$backup" > "$ROLLBACK_FILE"
@@ -161,7 +167,7 @@ command_rollback() {
   backup=$(sed -n '3p' "$ROLLBACK_FILE")
   [ -n "$previous" ] && [ -n "$backup" ] || fail 'Rollback metadata is incomplete.'
   if compose ps --status running --services | grep -q '^voxhf-relay$'; then
-    backup_named before-rollback >/dev/null
+    backup_named before-rollback >/dev/null || fail 'Database backup failed; rollback cancelled.'
   else
     echo '[WARN] Relay is not running; using the recorded pre-update backup.' >&2
   fi

@@ -11,6 +11,10 @@ const {
 } = require('./fsd-parser');
 
 const WEATHER_PENDING_TTL_MS = 2 * 60 * 1000;
+// FSD messages are small, newline-delimited records. Bound the pending record
+// rather than letting a missing delimiter grow memory for the whole session.
+const MAX_REMOTE_LINE_BYTES = 64 * 1024;
+const MAX_PENDING_BYTES = 1024 * 1024;
 
 function createFsdProxy(options) {
   // PilotCore thinks this is the IVAO FSD server. The proxy forwards to the
@@ -44,7 +48,8 @@ function createFsdProxy(options) {
     });
 
     const coreBuf = { text: '' };
-    const remoteBuf = { text: '' };
+    let remotePending = Buffer.alloc(0);
+    let waitingForEndpoint = false;
 
     coreSocket.on('data', (data) => {
       parseLines(coreBuf, data, (line) => handleFsdLine(line, 'outgoing'));
@@ -52,9 +57,68 @@ function createFsdProxy(options) {
     });
 
     remote.on('data', (data) => {
-      parseLines(remoteBuf, data, (line) => handleFsdLine(line, 'incoming'));
-      writeIfOpen(coreSocket, rewriteVoiceServer(data));
+      // TCP data events can split anywhere, including inside a VOICE hostname.
+      // Parse and rewrite the same complete record before forwarding any of it.
+      // Keep bytes intact: unrelated traffic and CRLF/LF delimiters must not be
+      // changed by decoding and re-encoding the stream.
+      remotePending = remotePending.length ? Buffer.concat([remotePending, data]) : data;
+      // pause() normally stops more chunks while an endpoint binds. Also cap
+      // already queued input and nonstandard socket implementations.
+      if (waitingForEndpoint) {
+        if (remotePending.length > MAX_PENDING_BYTES) rejectOversizedLine('pending FSD input exceeds the 1 MiB limit');
+        return;
+      }
+      drainRecords();
     });
+
+    function drainRecords() {
+      if (sessionId !== activeSessionId || coreSocket.destroyed || remote.destroyed) return;
+      const received = remotePending;
+      let start = 0;
+      let end;
+      while ((end = received.indexOf(0x0a, start)) !== -1) {
+        if (end - start > MAX_REMOTE_LINE_BYTES) return rejectOversizedLine();
+        const record = received.subarray(start, end + 1);
+        const line = record.subarray(0, record.length - 1).toString('utf8');
+        if (line.trim()) handleFsdLine(line, 'incoming');
+        let rewritten;
+        try { rewritten = rewriteVoiceServer(record); }
+        catch (err) { logger.error(`[TS2] VOICE reply withheld: ${err.message}`); }
+        start = end + 1;
+        if (rewritten && typeof rewritten.then === 'function') {
+          remotePending = Buffer.from(received.subarray(start));
+          if (remotePending.length > MAX_PENDING_BYTES) {
+            // Consume a possible rejected preparation promise before closing.
+            rewritten.catch(() => {});
+            return rejectOversizedLine('pending FSD input exceeds the 1 MiB limit');
+          }
+          waitingForEndpoint = true;
+          remote.pause?.();
+          rewritten.then(bytes => {
+            if (sessionId === activeSessionId && bytes) writeIfOpen(coreSocket, bytes);
+          }).catch(err => {
+            // A failed local listener must not bypass VoxHF or disconnect the
+            // flight. Drop only this VOICE reply and keep chat/FSD working.
+            logger.error(`[TS2] VOICE reply withheld: ${err.message}`);
+          }).finally(() => {
+            waitingForEndpoint = false;
+            drainRecords();
+            if (!waitingForEndpoint && sessionId === activeSessionId) remote.resume?.();
+          });
+          return;
+        }
+        if (rewritten) writeIfOpen(coreSocket, rewritten);
+      }
+      if (received.length - start > MAX_REMOTE_LINE_BYTES) return rejectOversizedLine();
+      // Copy only the unfinished tail; do not retain the complete TCP buffer.
+      remotePending = Buffer.from(received.subarray(start));
+    }
+
+    function rejectOversizedLine(reason = 'FSD line exceeds the 64 KiB limit') {
+      remotePending = Buffer.alloc(0);
+      logger.error(`[6809] IVAO: ${reason}; closing connection.`);
+      close(sessionId, coreSocket, remote);
+    }
 
     coreSocket.on('close', () => close(sessionId, coreSocket, remote));
     remote.on('close', () => close(sessionId, coreSocket, remote));
@@ -76,6 +140,10 @@ function createFsdProxy(options) {
     if (!msg) return;
     msg.direction = direction;
 
+    if (direction === 'outgoing' && msg.kind === 'atc_detected' && line.startsWith('$CQ')) {
+      options.routeTrace?.event('fsd-query', { station: msg.callsign });
+    }
+
     const callsign = state.getCallsign();
     if (msg.kind === 'login' && (!callsign || msg.callsign === callsign)) {
       state.setCallsign(msg.callsign, false);
@@ -91,7 +159,7 @@ function createFsdProxy(options) {
     if (msg.kind === 'message' && handleWeatherReply(msg)) return;
 
     if (msg.kind === 'atc_voice_info') {
-      options.onVoiceServer(msg.ts2Server);
+      options.routeTrace?.event('fsd-reply', { station: msg.atc, host: msg.ts2Server });
       logger.log(`[TS2] ${msg.atc} -> ${msg.ts2Server}/${msg.channelName}`);
     }
 
@@ -115,21 +183,18 @@ function createFsdProxy(options) {
   }
 
   function rewriteVoiceServer(data) {
-    // FSD VOICE replies contain "host/channel". Replacing the host with LAN_IP
-    // keeps the channel intact while steering Altitude's TS2 connection through
-    // the local UDP proxy.
-    const text = data.toString('utf8');
+    // Preserve distinct servers through distinct local endpoints. A VOICE
+    // discovery reply must never select or reset the active voice session.
+    // Match ASCII protocol fields with a reversible byte-to-string mapping so
+    // replacing a host never corrupts non-ASCII bytes elsewhere in the record.
+    const text = data.toString('latin1');
     if (!text.includes(':VOICE:')) return data;
 
-    const changed = text.replace(/(\$CR[^:]+:[^:]+:VOICE:[^:]+:)([^/\r\n]+)(\/[^\r\n]*)/g, (match, prefix, serverHost, channel) => {
-      const lanIp = options.getLanIp();
-      if (serverHost === lanIp) return match;
-      options.onVoiceServer(serverHost);
-      logger.log(`[TS2] Voice server ${serverHost} -> ${lanIp}`);
-      return prefix + lanIp + channel;
-    });
-
-    return changed === text ? data : Buffer.from(changed, 'utf8');
+    const match = /^(\$CR[^:]+:[^:]+:VOICE:[^:]+:)([^/\r\n]+)(\/[^\r\n]*)/.exec(text);
+    if (!match) return data;
+    const endpoint = options.getVoiceEndpoint(match[2]);
+    const replace = address => Buffer.from(match[1] + address + match[3] + text.slice(match[0].length), 'latin1');
+    return endpoint && typeof endpoint.then === 'function' ? endpoint.then(replace) : replace(endpoint);
   }
 
   function close(sessionId, coreSocket, remoteSocket) {
@@ -297,6 +362,7 @@ function createFsdProxy(options) {
     const tokens = String(text || '').replace(/=$/, '').trim().split(/\s+/);
     let index = 0;
     if (kind === 'metar' && /^(METAR|SPECI)$/i.test(tokens[index] || '')) index += 1;
+    if (kind === 'metar' && /^COR$/i.test(tokens[index] || '')) index += 1;
     if (kind === 'taf' && /^TAF$/i.test(tokens[index] || '')) index += 1;
     if (kind === 'taf' && /^(AMD|COR)$/i.test(tokens[index] || '')) index += 1;
     const candidate = String(tokens[index] || '').toUpperCase();

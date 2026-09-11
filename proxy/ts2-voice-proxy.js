@@ -24,15 +24,19 @@ function createTs2VoiceProxy(options) {
   const config = options.config || {};
   const port = options.port;
   const logger = options.logger || console;
+  const trace = options.routeTrace;
   const sampleRate = Number(config.voiceSampleRate) || 32000;
   const stripBytes = Number(config.voiceStripBytes) || 1;
   const framesPerPacket = Number(config.voiceFramesPerPacket) || 12;
   const diagnostics = config.voiceDiagnostics === true;
   const udpClients = new Map();
   const udpDiagStates = new Map();
+  const udpTargets = new Map();
+  const tcpClients = new Set();
 
   let realServer = options.initialServer || 'ts-1.eu-west-2.ivao.aero';
   let realIp = null;
+  let dnsGeneration = 0;
   let voiceWriter = null;
   let voiceFfmpeg = null;
   let rxLogTimer = null;
@@ -71,7 +75,11 @@ function createTs2VoiceProxy(options) {
   function resolveServer() {
     // UDP forwarding can use the hostname directly, but resolving once keeps
     // logs clearer and avoids repeated DNS work while voice packets are flowing.
+    // Only the latest request may update the cache: comparing hostnames alone
+    // would still accept stale results after A -> B -> A or same-host refreshes.
+    const generation = ++dnsGeneration;
     dns.resolve4(realServer, (err, addrs) => {
+      if (generation !== dnsGeneration) return;
       if (!err && addrs[0]) realIp = addrs[0];
     });
   }
@@ -109,9 +117,11 @@ function createTs2VoiceProxy(options) {
       '-f', 'ogg', '-i', 'pipe:0',
       '-f', 's16le', '-ar', '16000', '-ac', '1', 'pipe:1',
     ]);
+    const decoder = voiceFfmpeg;
 
     voiceFfmpeg.stdin.on('error', () => {});
     voiceFfmpeg.stdout.on('data', (pcm) => {
+      if (voiceFfmpeg !== decoder) return;
       rxStats.pcmChunks += 1;
       rxStats.pcmBytes += pcm.length;
       scheduleRxLog();
@@ -122,6 +132,7 @@ function createTs2VoiceProxy(options) {
       if (diagnostics && text) logger.warn(`[VOICE ffmpeg] ${text}`);
     });
     voiceFfmpeg.on('exit', (code, signal) => {
+      if (voiceFfmpeg !== decoder) return;
       flushRxStats();
       if (code !== 0 && code !== null) logger.warn(`[VOICE] RX decoder exited code=${code} signal=${signal || ''}`);
       voiceFfmpeg = null;
@@ -232,11 +243,15 @@ function createTs2VoiceProxy(options) {
   // TCP is normally pass-through, but voiceDiagnostics can sample the initial
   // login/join stream to find the session bytes Altitude later uses for UDP TX.
   const tcpServer = net.createServer((client) => {
+    if (options.acceptClient && !options.acceptClient(client.remoteAddress)) return destroyIfOpen(client);
+    tcpClients.add(client);
     const target = getTarget();
+    trace?.event('tcp-open', { transport: 'ts2-tcp', stream: trace.id(client), host: target.host, port: target.port });
     const tcpId = ++tcpDiagId;
     const tcpDiag = { c2s: 0, s2c: 0 };
     const remote = net.createConnection({ host: target.host, port: target.port });
     client.on('data', (d) => {
+      trace?.packet('ts2-tcp', 'out', client, d);
       tcpDiag.c2s += 1;
       if (tcpDiag.c2s <= DIAG_TCP_PACKETS_PER_DIRECTION) {
         logTs2Diagnostic('TCP', 'client->server', tcpDiag.c2s, d, `tcp=${tcpId}`);
@@ -244,13 +259,18 @@ function createTs2VoiceProxy(options) {
       writeIfOpen(remote, d);
     });
     remote.on('data', (d) => {
+      trace?.packet('ts2-tcp', 'in', client, d);
       tcpDiag.s2c += 1;
       if (tcpDiag.s2c <= DIAG_TCP_PACKETS_PER_DIRECTION) {
         logTs2Diagnostic('TCP', 'server->client', tcpDiag.s2c, d, `tcp=${tcpId}`);
       }
       writeIfOpen(client, d);
     });
-    client.on('close', () => destroyIfOpen(remote));
+    client.on('close', () => {
+      tcpClients.delete(client);
+      trace?.event('tcp-close', { transport: 'ts2-tcp', stream: trace.id(client) });
+      destroyIfOpen(remote);
+    });
     remote.on('close', () => destroyIfOpen(client));
     client.on('error', () => destroyIfOpen(remote));
     remote.on('error', () => destroyIfOpen(client));
@@ -264,7 +284,9 @@ function createTs2VoiceProxy(options) {
     // instead of reusing a dead route. Web TX can then clear any seed tied to
     // that old session.
     if (udpClients.get(key) !== remote) return;
+    trace?.event('udp-close', { transport: 'ts2-udp', stream: trace.id(remote) });
     udpClients.delete(key);
+    udpTargets.delete(key);
     udpDiagStates.delete(key);
     options.onClientClose?.(key, reason);
   }
@@ -280,6 +302,7 @@ function createTs2VoiceProxy(options) {
   }
 
   udpSocket.on('message', (msg, rinfo) => {
+    if (options.acceptClient && !options.acceptClient(rinfo.address)) return;
     // Each local Altitude UDP source gets a paired UDP socket to the real TS2
     // server. This preserves source-port based session behavior on both sides.
     const key = `${rinfo.address}:${rinfo.port}`;
@@ -289,13 +312,18 @@ function createTs2VoiceProxy(options) {
       remote = dgram.createSocket('udp4');
       udpClients.set(key, remote);
       const target = getTarget();
+      udpTargets.set(key, target);
+      trace?.event('udp-open', { transport: 'ts2-udp', stream: trace.id(remote), host: target.host, port: rinfo.port });
       logger.log(`[TS2 UDP] ${key} -> ${target.host}:${target.port}`);
 
       remote.on('message', (reply) => {
+        if (udpClients.get(key) !== remote) return;
+        trace?.packet('ts2-udp', 'in', remote, reply);
         // Server replies are always forwarded to Altitude first. RX decoding is
         // a side tap for the webapp and must never block simulator audio.
         logUdpDiagnostic(key, 'server->client', reply);
         udpSocket.send(reply, rinfo.port, rinfo.address);
+        if (options.shouldDecode && !options.shouldDecode()) return;
         const cls = reply.length >= 2 ? reply.readUInt16LE(0) : 0;
         const subtype = reply.length >= 4 ? reply.readUInt16LE(2) : 0;
         if (cls === CLASS_RXVOICE && subtype === SUBTYPE_VOICE && reply.length > RX_HEADER_BYTES) {
@@ -314,8 +342,9 @@ function createTs2VoiceProxy(options) {
     }
 
     logUdpDiagnostic(key, 'client->server', msg);
-    options.onClientPacket?.(msg, key, remote);
-    const target = getTarget();
+    trace?.packet('ts2-udp', 'out', remote, msg);
+    const target = udpTargets.get(key);
+    options.onClientPacket?.(msg, key, remote, target);
     remote.send(msg, target.port, target.host);
   });
 
@@ -329,6 +358,13 @@ function createTs2VoiceProxy(options) {
     getTarget,
     stopVoiceDecoder,
     resetUdpClients,
+    close(reason = 'TS2 proxy closed') {
+      resetUdpClients(reason);
+      stopVoiceDecoder();
+      for (const client of tcpClients) destroyIfOpen(client);
+      try { tcpServer.close(); } catch (_) {}
+      try { udpSocket.close(); } catch (_) {}
+    },
   };
 }
 

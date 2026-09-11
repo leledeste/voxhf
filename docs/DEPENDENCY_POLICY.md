@@ -29,6 +29,12 @@ model, modifications, and combined-work obligations. Record the decision in
 
 ## Current Baseline
 
+Node.js 24 LTS is the tested runtime baseline (minimum Node.js 24). Docker
+builds and CI use that major version. After changing Node.js major versions,
+reinstall locked dependencies with `npm ci` so native modules match the runtime.
+Docker operators rebuild the relay image; they do not need to install Node.js
+on the host. See [Self-Hosting](SELF_HOSTING.md) for the deployment procedure.
+
 Runtime npm dependencies:
 
 | Package | Purpose | License/handling |

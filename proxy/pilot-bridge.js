@@ -92,6 +92,8 @@ function createPilotBridge(options) {
   }
 
   const server = net.createServer((uiSocket) => {
+    const trace = options.routeTrace;
+    trace?.event('tcp-open', { transport: 'pilot', stream: trace.id(uiSocket) });
     // Each PilotUI connection gets one paired PilotCore connection. Closing one
     // side destroys the other, which keeps Altitude from waiting on stale TCP
     // sessions after reconnects.
@@ -104,16 +106,19 @@ function createPilotBridge(options) {
     });
 
     uiSocket.on('data', (data) => {
+      trace?.packet('pilot', 'out', uiSocket, data);
       learnComFrequency(data);
       writeIfOpen(coreSocket, rewriteFsdHost(data));
     });
 
     coreSocket.on('data', (data) => {
+      trace?.packet('pilot', 'in', uiSocket, data);
       learnComFrequency(data);
       writeIfOpen(uiSocket, data);
     });
 
     uiSocket.on('close', () => {
+      trace?.event('tcp-close', { transport: 'pilot', stream: trace.id(uiSocket) });
       destroyIfOpen(coreSocket);
       if (pilotUiSocket === uiSocket) pilotUiSocket = null;
     });

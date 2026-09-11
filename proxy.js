@@ -8,8 +8,8 @@
  * 2. This program forwards data to PilotCore, but replaces the IVAO FSD IP
  *    with 127.0.0.1 so PilotCore goes through the local FSD proxy.
  * 3. The local FSD proxy reads chat, commands, weather, and VOICE messages.
- * 4. When IVAO announces the TS2 voice server, we replace it with the proxy
- *    local network IP so TS2 traffic also passes through this program.
+ * 4. Each announced TS2 server gets a distinct local loopback endpoint so
+ *    Altitude retains server identity while traffic passes through this program.
  * 5. The TS2 voice proxy forwards everything to the real server and decodes RX voice
  *    only for the webapp.
  *
@@ -29,7 +29,8 @@ const { readConfig, listLocalNetworkIps, detectLanIp } = require('./proxy/config
 const { failListen } = require('./proxy/port-diagnostics');
 const { createRemoteAgent } = require('./proxy/remote-agent');
 const { createWebTx } = require('./proxy/web-tx');
-const { createTs2VoiceProxy } = require('./proxy/ts2-voice-proxy');
+const { createTs2VoiceRouter } = require('./proxy/ts2-voice-router');
+const { createVoiceRouteTrace } = require('./proxy/voice-route-trace');
 const { createPilotBridge } = require('./proxy/pilot-bridge');
 const { createFsdProxy } = require('./proxy/fsd-proxy');
 const { createAppState, disconnectAlertSuppressionReason } = require('./proxy/app-state');
@@ -51,6 +52,11 @@ const {
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const CONFIG = readConfig(CONFIG_PATH);
+const routeTrace = createVoiceRouteTrace({ enabled: process.argv.includes('--trace-voice-routing') });
+if (routeTrace) {
+  // The metadata-only investigation must not enable the older raw packet logs.
+  CONFIG.voiceDiagnostics = false;
+}
 const APP_VERSION = require('./package.json').version;
 
 const INTERNAL_PORT = 4827;              // PilotUI -> VoxHF -> PilotCore
@@ -103,32 +109,39 @@ const unicomTimer = createUnicomTimer({
 });
 
 const pilotBridge = createPilotBridge({
+  routeTrace,
   port: INTERNAL_PORT,
   pilotCoreHost: PILOTCORE_HOST,
   fsdPort: FSD_PORT,
   logger: console,
   onFsdHost: (ip) => { IVAO_FSD_HOST = ip; },
   onCallsign: appState.setCallsign,
-  onComFrequency: appState.updateComFrequency,
+  onComFrequency: (com, freq) => {
+    routeTrace?.event('com', { com, freq: formatComFrequency(freq) });
+    appState.updateComFrequency(com, freq);
+  },
 });
 
-const ts2Voice = createTs2VoiceProxy({
+const ts2Voice = createTs2VoiceRouter({
+  routeTrace,
   config: CONFIG,
   port: TS2_PORT,
   logger: console,
+  localAddresses: LOCAL_IPS.map(candidate => candidate.ip),
+  onSessionReset: reason => clearWebTxReadiness(reason),
   onPcm: deliverRxPcm,
   onClientPacket: (msg, key, remote) => webTx?.cacheTxSession(msg, key, remote),
   onClientClose: (key, reason) => webTx?.invalidateTxSession(reason || 'TS2 UDP client closed', key),
 });
 
 const fsdProxy = createFsdProxy({
+  routeTrace,
   port: FSD_PORT,
   state: appState,
   logger: console,
   timestamp,
   getHost: () => IVAO_FSD_HOST,
-  getLanIp: () => LAN_IP,
-  onVoiceServer: updateVoiceServer,
+  getVoiceEndpoint: server => ts2Voice.getEndpoint(server),
   onConnected: handleIvaoConnected,
   onClose: ({ wasConnected } = {}) => {
     cancelIvaoConnectedAlert();
@@ -406,17 +419,6 @@ function clearWebTxReadiness(reason) {
   if (webTx) webTx.invalidateTxSession(reason);
 }
 
-function updateVoiceServer(server) {
-  const before = ts2Voice.getServer();
-  const after = ts2Voice.setServer(server);
-  if (after !== before) {
-    ts2Voice.stopVoiceDecoder();
-    ts2Voice.resetUdpClients('voice server changed');
-    clearWebTxReadiness('voice server changed');
-  }
-  return after;
-}
-
 // ---------------------------------------------------------------------------
 // Commands sent to PilotCore
 // ---------------------------------------------------------------------------
@@ -493,13 +495,7 @@ fsdProxy.server.listen(FSD_PORT, '127.0.0.1', () => {
   console.log(`[6809] FSD proxy on 127.0.0.1:${FSD_PORT}`);
 });
 
-ts2Voice.tcpServer.listen(TS2_PORT, '0.0.0.0', () => {
-  console.log(`[TS2 TCP] Listening on 0.0.0.0:${TS2_PORT}`);
-});
-
-ts2Voice.udpSocket.bind(TS2_PORT, '0.0.0.0', () => {
-  console.log(`[TS2 UDP] Listening on 0.0.0.0:${TS2_PORT}`);
-});
+console.log(`[TS2] Per-server loopback endpoints will listen on port ${TS2_PORT}.`);
 
 localWeb.listen(() => {
   console.log(`[HTTP] Webapp at http://localhost:${WEB_PORT}`);

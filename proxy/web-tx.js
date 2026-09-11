@@ -256,6 +256,7 @@ function createWebTx(options) {
     // The monitor path decodes the web microphone locally and sends it back to
     // the browser as PCM. It is a microphone/encoder test, not a network test.
     const writer = new OggSpeexWriter(sampleRate, framesPerPacket);
+    let closed = false;
     const decoder = spawn('ffmpeg', [
       '-hide_banner', '-loglevel', 'error',
       '-f', 'ogg', '-i', 'pipe:0',
@@ -264,15 +265,18 @@ function createWebTx(options) {
 
     decoder.stdin.on('error', () => {});
     decoder.stdout.on('data', (pcm) => {
-      if (isWsOpen(ws)) ws.send(pcm);
+      if (!closed && isWsOpen(ws)) ws.send(pcm);
     });
     decoder.stdin.write(writer.headers());
 
     return {
       write(packet) {
-        writeIfOpen(decoder.stdin, writer.frame(packet));
+        if (!closed) writeIfOpen(decoder.stdin, writer.frame(packet));
       },
       close() {
+        // stdout can still deliver buffered PCM after ending/killing ffmpeg.
+        if (closed) return;
+        closed = true;
         safeEnd(decoder.stdin);
         safeKill(decoder);
       },
@@ -328,6 +332,8 @@ function createWebTx(options) {
     txState.ffmpeg = ffmpeg;
     ffmpeg.stdin.on('error', () => {});
     ffmpeg.stdout.on('data', (chunk) => {
+      // A stopped encoder may drain output after a new PTT session starts.
+      if (webTxBySocket.get(ws) !== txState) return;
       txState.stats.oggBytes += chunk.length;
       reader.push(chunk);
     });
@@ -336,6 +342,9 @@ function createWebTx(options) {
       if (diagnostics && text) logger.warn(`[WEBTX ffmpeg] ${text}`);
     });
     ffmpeg.on('exit', (code, signal) => {
+      // Child exit is asynchronous: only the session owning this encoder may
+      // be stopped, never its replacement on the same browser/relay socket.
+      if (webTxBySocket.get(ws) !== txState) return;
       txState.stats.ffmpegExit = `code=${code} signal=${signal || ''}`;
       stop(ws, 'encoder closed');
     });

@@ -116,8 +116,15 @@ function stageArchive(archive, destination, expectedVersion) {
       '-NoProfile', '-NonInteractive', '-Command',
       `Expand-Archive -LiteralPath ${powerShellLiteral(archive)} -DestinationPath ${powerShellLiteral(temporary)} -Force`,
     ];
-    const result = spawnSync('powershell.exe', command, { encoding: 'utf8', windowsHide: true });
-    if (result.status !== 0) throw new Error((result.stderr || result.stdout || 'Could not extract update.').trim());
+    // Node inherits PS7 module paths, unlike a direct PS7 -> powershell.exe
+    // launch. Let Windows PowerShell rebuild its own defaults for this child
+    // only; do not alter the user's environment or execution policy.
+    const env = Object.fromEntries(Object.entries(process.env)
+      .filter(([key]) => key.toLowerCase() !== 'psmodulepath'));
+    const result = spawnSync('powershell.exe', command, { encoding: 'utf8', windowsHide: true, env });
+    if (result.status !== 0) {
+      throw new Error((result.stderr || result.stdout || result.error?.message || 'Could not extract update.').trim());
+    }
     const entries = fs.readdirSync(temporary, { withFileTypes: true });
     if (entries.length !== 1 || !entries[0].isDirectory()) throw new Error('Update ZIP must contain one top-level folder.');
     const extracted = path.join(temporary, entries[0].name);
