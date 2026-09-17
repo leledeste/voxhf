@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-title" content="VoxHF">
   <title>Workspace | VoxHF</title>
   <link rel="manifest" href="manifest.webmanifest?v=20260802-4">
-  <link rel="stylesheet" href="styles.css?v=20260803-1">
+  <link rel="stylesheet" href="styles.css?v=20260917-2">
 </head>
 <body>
   <div class="app">
@@ -34,7 +34,7 @@
         <span class="telemetry-cell callsign-pill"><span class="telemetry-copy"><small>Callsign</small><strong id="callsign">---</strong></span></span>
       </div>
       <div class="header-actions">
-        <span id="rx-light" class="rx-light"><small>Audio</small><strong>RX</strong></span>
+        <span id="rx-light" class="rx-light"><small id="rx-caption">Audio</small><strong>RX</strong></span>
         <button id="theme-toggle" class="header-button" type="button" aria-label="Switch color theme"><span id="theme-label">Dark</span></button>
         <button id="settings-open" class="header-button settings-button" type="button">Settings</button>
       </div>
@@ -54,6 +54,13 @@
         <section class="surface radio-surface">
           <div class="surface-heading">
             <div><span class="eyebrow">Voice</span><h1>Radios</h1></div>
+            <button id="rx-mute" type="button" aria-label="Mute web RX audio" aria-pressed="false" title="Mute web RX audio; TX and notifications stay active.">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <path class="rx-speaker-body" d="M11 5 6 9H3v6h3l5 4Z" />
+                <path class="rx-speaker-waves" d="M15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14" />
+                <path class="rx-speaker-slash" d="m4 4 16 16" />
+              </svg>
+            </button>
           </div>
           <button id="rx-activation-prompt" class="rx-activation-prompt hidden" type="button">
             <span class="rx-activation-mark" aria-hidden="true">RX</span>
@@ -127,7 +134,7 @@
             <div class="tabs" role="tablist" aria-label="Message filters">
               <button id="tab-all" class="tab active" data-filter="all" type="button">All</button>
               <button id="tab-frequency" class="tab" data-filter="frequency" type="button">Frequency</button>
-              <button id="tab-private" class="tab" data-filter="private" type="button">Private</button>
+              <button id="tab-for-you" class="tab" data-filter="for-you" type="button">For you</button>
               <button id="tab-system" class="tab" data-filter="system" type="button">System</button>
             </div>
           </div>
@@ -192,9 +199,15 @@
         <button class="settings-tab" type="button" data-settings-tab="connection">Connection</button>
         <button class="settings-tab" type="button" data-settings-tab="remote">Remote</button>
         <button class="settings-tab" type="button" data-settings-tab="notifications">Notifications</button>
+        <button class="settings-tab" type="button" data-settings-tab="chat">Chat</button>
         <button class="settings-tab" type="button" data-settings-tab="about">About</button>
       </div>
       <div class="settings-body">
+        <section class="settings-page hidden" data-settings-page="chat">
+          <p class="settings-help">Drag tabs with a mouse, or hold a tab briefly then drag on touch screens. A quick swipe still scrolls the strip. The arrows below also work with touch and keyboards. All stays available. The × hides a tab, not its messages or draft; a new incoming message shows it again. Reopen hidden conversations here or with .chat CALLSIGN.</p>
+          <p id="settings-chat-storage" class="settings-help"></p>
+          <div id="settings-chat-list" aria-label="Chat tab order and visibility"></div>
+        </section>
         <section class="settings-page" data-settings-page="audio">
           <div class="settings-grid">
             <div class="setting-row">
@@ -451,6 +464,6 @@
 
   <script src="weather.js?v=20260910-1"></script>
   <script src="account.js?v=20260802-5"></script>
-  <script src="app.js?v=20260909-1"></script>
+  <script src="app.js?v=20260917-1"></script>
 </body>
 </html>

@@ -9,6 +9,44 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+function shellEnvironment(bin, shell, inherited = process.env) {
+  // Windows treats Path/PATH as one variable, but Node child environments can
+  // contain both spellings. Remove every variant before setting the test PATH.
+  const entries = Object.entries(inherited);
+  const inheritedPath = entries.find(([key]) => key.toUpperCase() === 'PATH')?.[1] || '';
+  return {
+    ...Object.fromEntries(entries.filter(([key]) => key.toUpperCase() !== 'PATH')),
+    PATH: [bin, path.dirname(shell), inheritedPath].join(path.delimiter),
+  };
+}
+
+// Establish stub priority after shell startup/path conversion, and fail closed
+// before invoking the deployment script if any external tool resolves elsewhere.
+const isolatedLaunch = `
+set -eu
+stub_dir="$(pwd)/bin"
+PATH="$stub_dir:$PATH"
+export PATH
+for tool in git docker curl; do
+  if [ "$(command -v "$tool")" != "$stub_dir/$tool" ]; then
+    echo "Test isolation failed: $tool is not a stub" >&2
+    exit 86
+  fi
+done
+exec "$0" "$@"
+`;
+
+for (const inherited of [
+  { Path: 'host-tools', PATH: 'other-tools' },
+  { PATH: 'host-tools', Path: 'other-tools' },
+  { Path: 'host-tools' },
+]) {
+  const env = shellEnvironment('test-bin', 'sh', inherited);
+  assert.deepStrictEqual(Object.keys(env).filter(key => key.toUpperCase() === 'PATH'), ['PATH']);
+  assert.strictEqual(env.PATH.split(path.delimiter)[0], 'test-bin');
+  assert.ok(env.PATH.endsWith('host-tools'));
+}
+
 function findShell() {
   const candidates = ['sh'];
   if (process.platform === 'win32') {
@@ -121,15 +159,31 @@ else
   esac
 fi
 `);
-    // Preserve the shell's bundled utilities on Windows while placing stubs
-    // first. MSYS converts this native PATH when launching Git's sh.exe.
-    const result = spawnSync(shell, [script, command], {
+    const testEnv = {
+      ...shellEnvironment(bin, shell),
+      TEST_MODE: mode, TEST_TRACE: trace.replace(/\\/g, '/'), TEST_PULLED: pulled.replace(/\\/g, '/'),
+    };
+    const args = ['-c', isolatedLaunch, shell.replace(/\\/g, '/'), script, command];
+    if (mode === 'success') {
+      // A missing stub must abort even if a real Git is installed on the host.
+      const gitStub = path.join(bin, 'git');
+      const parkedStub = path.join(bin, 'git.disabled');
+      fs.renameSync(gitStub, parkedStub);
+      try {
+        const rejected = spawnSync(shell, args, {
+          cwd: directory, encoding: 'utf8', timeout: 10000, env: testEnv,
+        });
+        assert.strictEqual(rejected.status, 86, rejected.stderr);
+        assert.match(rejected.stderr, /Test isolation failed: git is not a stub/);
+        assert.ok(!fs.existsSync(trace), 'deployment must not run without every stub');
+        assert.strictEqual(fs.readFileSync(rollback, 'utf8'), originalRollback);
+      } finally {
+        fs.renameSync(parkedStub, gitStub);
+      }
+    }
+    const result = spawnSync(shell, args, {
       cwd: directory, encoding: 'utf8', timeout: 10000,
-      env: {
-        ...process.env,
-        PATH: [bin, path.dirname(shell), process.env.PATH || ''].join(path.delimiter),
-        TEST_MODE: mode, TEST_TRACE: trace.replace(/\\/g, '/'), TEST_PULLED: pulled.replace(/\\/g, '/'),
-      },
+      env: testEnv,
     });
     if (result.error) throw result.error;
     const calls = fs.existsSync(trace) ? fs.readFileSync(trace, 'utf8') : '';

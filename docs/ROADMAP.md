@@ -29,7 +29,8 @@ in [CHANGELOG.md](../CHANGELOG.md).
   VoxHF exposes the requirement over the radio panel and repeats it only when
   foreground recovery fails.
 - iOS may change its audio route/volume while the microphone is active.
-- Automatic UNICOM voice reports are not supported. Current UNICOM support is
+- Official Voice UNICOM RX/TX and automatic voice reports are not supported.
+  Current UNICOM support is
   manual frequency/text plus the synchronized three-minute reminder.
 - Local Slim requires Node.js and ffmpeg and is checksum-verified, but it is not
   a signed Windows executable.
@@ -45,9 +46,6 @@ in [CHANGELOG.md](../CHANGELOG.md).
   and to other Altitude/network setups. TX recovery without restarting the
   proxy and cross-server RX/TX have been confirmed; see the
   [routing validation guide](VOICE_ROUTING_DIAGNOSTICS.md).
-- Add an explicit controller-voice mute/output control so users at the
-  simulator PC can avoid hearing Altitude and browser RX twice without changing
-  the current audio path silently.
 - Improve mobile audio-route recovery and make failure states easier to
   diagnose without exposing packet-level controls.
 - Broaden METAR/TAF interpretation, edge cases, and explanatory tooltips.
@@ -55,8 +53,45 @@ in [CHANGELOG.md](../CHANGELOG.md).
   coordinates. Candidate forms are a compact route strip or a map with the
   aircraft, next waypoint, remaining distance, altitude, IAS, and Mach when the
   local protocols provide reliable values.
-- Add a structured clearance/communication scratchpad.
+- Add a structured IFR/VFR cosciale with FPL-prefilled fields and free notes.
+- Add VID-based friends and private-chat names, Add friend from a conversation,
+  online presence, and `.chat` by saved name; see the
+  [friends plan](FEATURE_PLANS.md#friends-identity-and-presence).
+  Extending page-only drafts with refresh survival and synchronization remains a
+  [future design decision](FEATURE_PLANS.md#per-conversation-drafts).
+- Show ATC spoken radio names for the connected position, keeping dropdowns
+  limited to callsign/frequency; investigate the available IVAO data source.
+- Add a copyable ATC contact log: qualify a position only after own TX followed
+  by RX on that same position, with no visible timestamps.
+- Show the current voice speaker beside RX if TS2 sender identity can be verified.
+- Indicate stale source data without treating unchanged values as stale.
+- Add customizable checklist templates, local import/export, and separately
+  designed account storage/sharing.
+- Evaluate a technical VoxHF preflight check.
 - Improve audit filtering and incident-oriented server diagnostics.
+
+Detailed decisions, examples, rejected alternatives, data sources, and open
+questions are preserved in [Feature Plans](FEATURE_PLANS.md), with implemented
+baselines explicitly versioned. The preflight check remains a proposal,
+not committed implementation work.
+
+## Live RX Speaker Identification Plan
+
+Show the current speaker only when the identity is reliable; otherwise retain
+ordinary RX. The full [speaker identification plan](FEATURE_PLANS.md#live-rx-speaker-identification)
+covers participant mappings, simultaneous speakers, privacy, and live validation.
+
+## Private Chat Aliases Plan
+
+Keep names beside real callsigns, with friends identified by VID rather than
+callsign ownership. The [alias notes](FEATURE_PLANS.md#private-chat-aliases)
+retain earlier UI alternatives; the current
+[friends plan](FEATURE_PLANS.md#friends-identity-and-presence) defines Add friend,
+name-based chat shortcuts, shared presence caching, and open storage decisions.
+Refresh is configurable at 15 seconds, 30 seconds, or 1 minute: local-only
+defaults to 30 seconds (user setting); relays default to 15 seconds (server
+administrator setting). This replaces the earlier session-only alias direction
+without making chat history persistent. No part of this plan is implemented.
 
 ## Installation And Operator Experience Plan
 
@@ -204,7 +239,8 @@ installation, import, update, rollback, and removal as separate test scenarios.
 - Opt-in live RX transcription with callsign context. It must not introduce
   voice recording or persistent audio storage.
 - Airport/taxi maps and route highlighting.
-- Aircraft model detection and optional checklists.
+- Automatic aircraft model detection for checklist selection; manually
+  customizable checklist templates are covered in [Feature Plans](FEATURE_PLANS.md#custom-checklists-and-sharing).
 - Compressed remote audio, only if measured bandwidth requires it.
 
 ## Not Planned

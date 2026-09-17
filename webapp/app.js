@@ -4,11 +4,13 @@ const REMOTE_BROWSER_ID_STORAGE_KEY = 'voxhf.remoteBrowserId.v1';
 const AUTH_MANUAL_STORAGE_KEY = 'voxhf.authManualMode.v1';
 const UPDATE_NOTICE_STORAGE_KEY = 'voxhf.dismissedUpdate.v1';
 const THEME_STORAGE_KEY = 'voxhf.theme.v1';
+const CHAT_LAYOUT_STORAGE_KEY = 'voxhf.chatLayout.v1:';
 const NOTIFICATION_ONLINE_STORAGE_KEY = 'voxhf.notificationOnline.v1';
 const NOTIFICATION_AGENT_OFFLINE_STORAGE_KEY = 'voxhf.notificationAgentOffline.v1';
 const DEFAULT_XPDR_STATE = { squawk: '7000', mode: 'stby' };
 const MAX_VISIBLE_STATION_DISTANCE_NM = 1200;
 const WEATHER_REQUEST_TIMEOUT_MS = 20000;
+const CHAT_FILTER_LABELS = { all: 'All', frequency: 'Frequency', 'for-you': 'For you', system: 'System' };
 const REMOTE_PROTOCOL_VERSION = 1;
 const REMOTE_MESSAGE_TYPES = {
   PING: 'ping',
@@ -589,12 +591,27 @@ const state = {
   filter: 'all',
   privatePeer: '',
   privatePeers: new Map(),
+  // Only layout/visibility metadata is persisted; never messages or drafts.
+  chatTabOrder: Object.keys(CHAT_FILTER_LABELS),
+  hiddenChatFilters: new Set(),
+  chatLayoutScope: '',
+  chatLayoutSaved: true,
+  draggedChatTab: '',
+  chatTabGestureActive: false,
+  chatTabsNeedRender: false,
+  chatDrafts: new Map(),
+  chatDraftKey: '',
+  chatRecipient: '@22800',
+  chatCallsign: '',
   stations: new Map(),
   ownPosition: null,
   comFrequencies: { 1: '', 2: '' },
   comStations: { 1: '', 2: '' },
   txSampleRate: 8000,
   audioCtx: null,
+  rxMuted: false,
+  rxPlaybackEpoch: 0,
+  rxSources: new Set(),
   nextAudioTime: 0,
   lastPcmAt: 0,
   audioUnlockBound: false,
@@ -1054,7 +1071,7 @@ function handleMessage(data) {
       if (data.notifications) applyNotificationState(data.notifications);
       applyUnicomTimerState(data.unicomTimer);
       if (data.callsign) state.callsign = data.callsign;
-      if (Array.isArray(data.log)) data.log.forEach(addMessage);
+      if (Array.isArray(data.log)) data.log.forEach(msg => addMessage(msg, true));
       if (data.connected) setOnline(data.callsign);
       else setOverlay('altitude');
       maybeShowUpdateNotice();
@@ -1185,7 +1202,7 @@ function handleRemoteRelayMessage(data) {
     case REMOTE_MESSAGE_TYPES.CHAT_HISTORY:
       markRemoteUpdate();
       if (Array.isArray(data.payload?.messages)) {
-        data.payload.messages.forEach(addRemoteChatMessage);
+        data.payload.messages.forEach(msg => addRemoteChatMessage(msg, true));
       }
       return;
     case REMOTE_MESSAGE_TYPES.NOTIFICATION_STATE:
@@ -1214,6 +1231,7 @@ function applyRemoteIdentity(payload) {
     userId: String(payload.userId || ''),
     userName: String(payload.userName || payload.userId || ''),
   };
+  renderPrivateTabs();
   applyUpdatePolicy({
     latestVersion: payload.recommendedAgentVersion || payload.relayVersion || '',
     recommendedLocalVersion: payload.recommendedAgentVersion || payload.relayVersion || '',
@@ -1307,6 +1325,8 @@ function selectRemoteDevice(deviceId, options = {}) {
   if (!deviceId) return;
   const changed = state.remoteSelectedDeviceId !== deviceId;
   state.remoteSelectedDeviceId = deviceId;
+  syncComposerDraft();
+  renderPrivateTabs();
   if (state.remote.enabled) {
     saveRemoteSettings({
       enabled: true,
@@ -1365,10 +1385,10 @@ function applyRemoteWeatherState(payload) {
   setFlightPlanStatus(payload.flightPlanStatus || 'missing', payload.flightPlan, payload.weatherState);
 }
 
-function addRemoteChatMessage(payload) {
+function addRemoteChatMessage(payload, history = false) {
   const sender = payload.sender || 'REMOTE';
   const recipient = payload.recipient || '';
-  const type = recipient === '*'
+  const type = payload.direction !== 'outgoing' && isWeatherChat(sender) ? 'system' : recipient === '*'
     ? 'broadcast'
     : recipient.startsWith('@')
       ? 'frequency'
@@ -1382,7 +1402,7 @@ function addRemoteChatMessage(payload) {
     direction: payload.direction === 'outgoing' ? 'outgoing' : 'incoming',
     timestamp: payload.timestamp || new Date().toISOString(),
     messageId: payload.messageId || '',
-  });
+  }, history);
 }
 
 function setOnline(callsign) {
@@ -1394,6 +1414,7 @@ function setOnline(callsign) {
   $('dot').classList.add('online');
   $('status-text').textContent = 'Connected';
   $('callsign').textContent = state.callsign || '---';
+  if (state.chatCallsign !== normalizeCallsign(state.callsign)) renderMessages();
   setControlsDisabled(false);
   updateSettingsView();
 }
@@ -1668,6 +1689,7 @@ function renderSettingsTab() {
     page.classList.toggle('hidden', page.dataset.settingsPage !== state.activeSettingsTab);
   });
   if (state.activeSettingsTab === 'remote') syncRemoteSettingsInputs(false);
+  if (state.activeSettingsTab === 'chat') renderChatSettings();
 }
 
 function syncRemoteSettingsInputs(force = false) {
@@ -1828,7 +1850,7 @@ function updateSettingsView() {
   setText('settings-voice-server', state.voiceServer);
   setText('settings-heartbeat', heartbeat);
   setText('settings-mic', state.micStatus);
-  setText('settings-output', output);
+  setText('settings-output', state.rxMuted ? `Muted (${output})` : output);
   setText('settings-webtx', webTx);
   setText('settings-sample-rate', `${state.txSampleRate} Hz`);
 
@@ -2217,6 +2239,48 @@ function urlBase64ToUint8Array(value) {
 }
 
 // RX audio: the proxy decodes Speex into mono 16-bit PCM and this queues it.
+function toggleRxMute() {
+  // Page-local playback only: never suspend the context, stop TX, or signal
+  // the proxy. Stop already queued RX too, so unmuting cannot replay old audio.
+  state.rxMuted = !state.rxMuted;
+  state.rxPlaybackEpoch += 1;
+  if (state.rxMuted) {
+    for (const source of state.rxSources) {
+      try { source.stop(); } catch (_) {}
+      source.disconnect();
+    }
+    state.rxSources.clear();
+  }
+  resetAudioSchedule();
+  $('rx-mute').setAttribute('aria-label', state.rxMuted ? 'Unmute web RX audio' : 'Mute web RX audio');
+  $('rx-mute').title = `${state.rxMuted ? 'Unmute' : 'Mute'} web RX audio; TX and notifications stay active.`;
+  $('rx-mute').setAttribute('aria-pressed', String(state.rxMuted));
+  $('rx-light').classList.toggle('muted', state.rxMuted);
+  $('rx-caption').textContent = state.rxMuted ? 'Muted' : 'Audio';
+  updateSettingsView();
+  // Keep the unmute click usable as the trusted iOS activation/recovery gesture.
+  if (!state.rxMuted) ensureAudio().catch(() => {});
+}
+
+function startRxSource(ctx, audio, when) {
+  const source = ctx.createBufferSource();
+  source.buffer = audio;
+  source.connect(ctx.destination);
+  state.rxSources.add(source);
+  source.onended = () => {
+    state.rxSources.delete(source);
+    source.disconnect();
+  };
+  try {
+    source.start(when);
+  } catch (error) {
+    state.rxSources.delete(source);
+    source.disconnect();
+    throw error;
+  }
+  state.nextAudioTime = when + audio.duration;
+}
+
 async function ensureAudio() {
   // Create one RX output and resume it whenever the current browser lifecycle
   // permits. A newly loaded iOS/iPadOS page still needs a trusted gesture;
@@ -2259,6 +2323,10 @@ async function handleIncomingPcm(buffer) {
   const now = Date.now();
   if (!state.lastPcmAt || now - state.lastPcmAt > 1500) resetAudioSchedule();
   state.lastPcmAt = now;
+  if (state.rxMuted) {
+    pulseRx();
+    return;
+  }
 
   try {
     await playPcm(buffer);
@@ -2272,7 +2340,11 @@ async function handleIncomingPcm(buffer) {
 async function playPcm(buffer) {
   // The proxy sends raw signed 16-bit mono PCM. Web Audio needs normalized
   // floats, then each chunk is scheduled back-to-back to avoid gaps.
+  if (state.rxMuted) return;
+  const epoch = state.rxPlaybackEpoch;
   const ctx = await ensureAudio();
+  // Mute may have been pressed while Safari was resuming the context.
+  if (state.rxMuted || epoch !== state.rxPlaybackEpoch) return;
   if (ctx.state !== 'running') {
     updateSettingsView();
     return;
@@ -2290,19 +2362,18 @@ async function playPcm(buffer) {
   const out = audio.getChannelData(0);
   for (let i = 0; i < samples.length; i++) out[i] = samples[i] / 32768;
 
-  const source = ctx.createBufferSource();
-  source.buffer = audio;
-  source.connect(ctx.destination);
   const when = Math.max(ctx.currentTime + 0.02, state.nextAudioTime);
-  source.start(when);
-  state.nextAudioTime = when + audio.duration;
+  startRxSource(ctx, audio, when);
   pulseRx();
 }
 
 async function playBrowserTestTone() {
   // This is local to the browser. In Remote mode it doubles as the user
   // gesture that unlocks mobile audio before live RX PCM arrives.
+  if (state.rxMuted) return;
+  const epoch = state.rxPlaybackEpoch;
   const ctx = await ensureAudio();
+  if (state.rxMuted || epoch !== state.rxPlaybackEpoch) return;
   const samples = Math.floor(RX_PCM_SAMPLE_RATE * 0.45);
   const audio = ctx.createBuffer(1, samples, RX_PCM_SAMPLE_RATE);
   const out = audio.getChannelData(0);
@@ -2310,12 +2381,8 @@ async function playBrowserTestTone() {
     const fade = Math.min(1, i / 600, (samples - i) / 600);
     out[i] = Math.sin(2 * Math.PI * 440 * i / RX_PCM_SAMPLE_RATE) * 0.35 * fade;
   }
-  const source = ctx.createBufferSource();
-  source.buffer = audio;
-  source.connect(ctx.destination);
   const when = ctx.currentTime + 0.02;
-  source.start(when);
-  state.nextAudioTime = when + audio.duration;
+  startRxSource(ctx, audio, when);
   pulseRx();
 }
 
@@ -2799,25 +2866,56 @@ function handleComposerKeydown(event) {
 }
 
 // Local chat and commands. METAR/TAF use the FSD form accepted by Altitude.
+function syncComposerDraft() {
+  // Drafts belong to this document, agent and recipient, not to history filters.
+  // Keep the old key until its visible text is saved, even if the tab changed.
+  const input = $('message-input');
+  const previous = state.chatDraftKey;
+  const scope = state.remote.enabled
+    ? [state.remote.relay, state.remoteIdentity.userId, state.remoteSelectedDeviceId]
+    : ['local'];
+  const recipient = state.filter === 'private-peer' && state.privatePeer
+    ? `private:${state.privatePeer}` : state.chatRecipient;
+  const next = JSON.stringify([scope, recipient]);
+  if (previous === next) return false;
+  if (previous) {
+    if (input.value) state.chatDrafts.set(previous, input.value);
+    else state.chatDrafts.delete(previous);
+  }
+  state.chatDraftKey = next;
+  input.value = state.chatDrafts.get(next) || '';
+  hideCommandMenu();
+  return Boolean(previous);
+}
+
 function submitMessage() {
   // A leading dot stays local and becomes a structured proxy command. Any
   // other text is sent as FSD chat to the selected recipient.
   const input = $('message-input');
+  // If an agent changed without a render, show its draft before accepting Send.
+  if (syncComposerDraft()) return;
+  const submittedKey = state.chatDraftKey;
   const text = input.value.trim();
   if (!text || !canSubmitMessage()) return;
 
-  if (text.startsWith('.')) {
-    if (runCommand(text)) {
-      input.value = '';
-      hideCommandMenu();
+  try {
+    let accepted;
+    if (text.startsWith('.')) {
+      accepted = runCommand(text);
+    } else {
+      const recipient = getRecipient();
+      accepted = recipient && send({ action: 'send_message', recipient, text });
     }
-    return;
-  }
-
-  const recipient = getRecipient();
-  if (send({ action: 'send_message', recipient, text })) {
-    input.value = '';
-    hideCommandMenu();
+    if (accepted) {
+      state.chatDrafts.delete(submittedKey);
+      // .chat may have opened a different composer containing another draft.
+      if (state.chatDraftKey === submittedKey) {
+        input.value = '';
+        hideCommandMenu();
+      }
+    }
+  } catch (_) {
+    addErrorMessage('Message could not be sent. Your draft has been kept.');
   }
 }
 
@@ -2839,21 +2937,20 @@ function runCommand(text) {
   if ((cmd === 'metar' || cmd === 'wx') && arg) return sendRawWeather(0, arg, 'METAR');
   if (cmd === 'taf' && arg) return sendRawWeather(1, arg, 'TAF');
   if (cmd === 'atis' && arg) {
-    send({ action: 'atis_request', callsign: arg });
+    if (!send({ action: 'atis_request', callsign: arg })) return false;
     addLocal(`ATIS requested: ${arg}`);
     return true;
   }
   if ((cmd === 'msg' || cmd === 'm') && arg && rest) {
-    send({ action: 'send_message', recipient: arg, text: rest });
-    return true;
+    return send({ action: 'send_message', recipient: arg, text: rest });
   }
   if (cmd === 'chat') {
     if (!arg) {
       addLocal('Usage: .chat CALLSIGN');
       return true;
     }
+    if (rest && !send({ action: 'send_message', recipient: arg, text: rest })) return false;
     openPrivateChat(arg);
-    if (rest) send({ action: 'send_message', recipient: arg, text: rest });
     return true;
   }
   if (cmd === 'c1' && arg) {
@@ -2884,20 +2981,34 @@ function runCommand(text) {
 function sendRawWeather(type, icao, label) {
   // METAR/TAF stay as typed requests so local and remote modes share the
   // same high-level intent. The local agent translates them to FSD.
-  send({ action: 'weather_request', kind: type === 1 ? 'taf' : 'metar', icao });
-  addLocal(`${label} requested: ${icao}`);
+  const code = normalizeIcao(icao);
+  if (!code) {
+    addErrorMessage(`Usage: .${type === 1 ? 'taf' : 'metar'} ICAO (four letters)`);
+    return false;
+  }
+  if (!send({ action: 'weather_request', kind: type === 1 ? 'taf' : 'metar', icao: code })) return false;
+  addLocal(`${label} requested: ${code}`);
+  // Explicit requests select the existing weather tab. Replies only reveal it,
+  // so closing the tab or switching conversations while waiting is respected.
+  openPrivateChat(type === 1 ? 'TAF' : 'METAR');
   return true;
 }
 
 function getRecipient() {
   // Private tabs lock the recipient to that peer. Other tabs use the
   // selector, with Custom converting frequencies to FSD @frequency format.
-  if (state.filter === 'private-peer' && state.privatePeer) return state.privatePeer;
+  if (state.filter === 'private-peer' && state.privatePeer) {
+    if (isWeatherChat(state.privatePeer)) {
+      addErrorMessage(`Use .${state.privatePeer.toLowerCase()} ICAO to request another report.`);
+      return '';
+    }
+    return state.privatePeer;
+  }
   const value = $('recipient').value;
   if (value.startsWith('private:')) return value.slice(8);
   if (value !== 'custom') return value;
   const custom = prompt('Recipient or frequency, for example EDGG_CTR or 122.800');
-  if (!custom) return '@22800';
+  if (!custom || !custom.trim()) return '';
   const freq = custom.match(/^1(\d{2})\.(\d{3})$/);
   return freq ? `@${freq[1]}${freq[2]}` : custom.toUpperCase();
 }
@@ -3089,16 +3200,17 @@ function clearAllWeatherRequests(render = true) {
   if (changed && render) renderWeatherPanel();
 }
 
-function addMessage(msg) {
+function addMessage(msg, history = false) {
   // Incoming and outgoing private messages are normalized with a privatePeer
   // key so a conversation can be rendered as one tab regardless of direction.
   if (!msg || msg.kind !== 'message') return;
+  syncChatLayout();
   if (!msg.messageId) msg.messageId = `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   if (state.messages.some((item) => item.messageId === msg.messageId)) return;
   const peer = privatePeerForMessage(msg);
   if (peer) {
     msg.privatePeer = peer;
-    rememberPrivatePeer(peer, msg.direction !== 'outgoing');
+    rememberPrivatePeer(peer, msg.direction !== 'outgoing', history, Date.parse(msg.timestamp));
   }
   state.messages.push(msg);
   if (state.messages.length > 400) state.messages.shift();
@@ -3165,10 +3277,21 @@ function addTransientLocal(text, visibleMs = 8000, fadeMs = 1000) {
   }, visibleMs + fadeMs);
 }
 
+function isMessageAddressedToMe(msg) {
+  // Match the Push callsign-prefix rule, not arbitrary mentions or substrings.
+  // This is a view of the active callsign, including replayed session history.
+  if (msg.direction === 'outgoing' || !['frequency', 'broadcast'].includes(msg.type)) return false;
+  const own = normalizeCallsign(state.callsign);
+  if (!own) return false;
+  const text = String(msg.text || '').trimStart().toUpperCase();
+  return text.startsWith(own) && (text.length === own.length || /[\s,:;]/.test(text.charAt(own.length)));
+}
+
 function renderMessages() {
   // Rendering is intentionally full-list and small-bounded. With a 400 item
   // cap this keeps the code simpler than maintaining incremental DOM state.
   const box = $('messages');
+  state.chatCallsign = normalizeCallsign(state.callsign);
   const filtered = state.messages.filter(messageMatchesCurrentTab);
   const view = `${state.filter}:${state.privatePeer || ''}`;
   const previousTop = box.scrollTop;
@@ -3193,7 +3316,8 @@ function renderMessages() {
     const row = document.createElement('div');
     row.dataset.chatMessageId = msg.messageId;
     const outgoing = msg.direction === 'outgoing';
-    row.className = `msg ${outgoing ? 'outgoing' : msg.type || ''}${msg.fading ? ' fading' : ''}`;
+    const addressed = isMessageAddressedToMe(msg);
+    row.className = `msg ${outgoing ? 'outgoing' : msg.type || ''}${addressed ? ' addressed' : ''}${msg.fading ? ' fading' : ''}`;
     const date = new Date(msg.timestamp || Date.now());
     const hh = String(date.getUTCHours()).padStart(2, '0');
     const mm = String(date.getUTCMinutes()).padStart(2, '0');
@@ -3203,6 +3327,7 @@ function renderMessages() {
       <div class="msg-head">
         <span>${hh}:${mm}Z</span>
         <span class="msg-from">${enc(msg.sender || 'SERVER')}${enc(to)}</span>
+        ${addressed ? '<span class="msg-addressed-label">For you</span>' : ''}
       </div>
       <div class="msg-text">${enc(msg.text || '')}</div>
       ${weather}`;
@@ -3233,9 +3358,16 @@ function normalizeCallsign(value) {
   return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '');
 }
 
+function isWeatherChat(peer) {
+  return /^(METAR|TAF)$/i.test(String(peer || ''));
+}
+
 function privatePeerForMessage(msg) {
   // A private message can be outgoing or incoming. The peer is whichever
   // side is not our callsign.
+  // Weather service tabs reuse the same non-destructive shortcut model, but
+  // their replies remain system messages rather than private conversations.
+  if (msg && msg.direction !== 'outgoing' && isWeatherChat(msg.sender)) return String(msg.sender).toUpperCase();
   if (!msg || msg.type !== 'private') return '';
   if (msg.privatePeer) return msg.privatePeer;
   const own = normalizeCallsign(state.callsign);
@@ -3247,14 +3379,19 @@ function privatePeerForMessage(msg) {
   return sender || recipient;
 }
 
-function rememberPrivatePeer(peer, incoming = false) {
-  // Private chat metadata is intentionally minimal: unread count plus the
-  // existence of the peer in the map.
+function rememberPrivatePeer(peer, incoming = false, history = false, timestamp = NaN) {
+  // Hiding only changes the shortcut. A fresh incoming message reveals it;
+  // duplicate history is discarded by addMessage before reaching this point.
+  syncChatLayout();
   const callsign = normalizeCallsign(peer);
   if (!callsign || callsign.startsWith('@') || callsign === '*' || callsign === 'SERVER') return;
   const current = state.privatePeers.get(callsign) || { unread: 0 };
+  if (incoming && (!history || timestamp > (current.hiddenAfter || 0))) current.hidden = false;
   if (incoming && !(state.filter === 'private-peer' && state.privatePeer === callsign)) current.unread += 1;
   state.privatePeers.set(callsign, current);
+  const key = `private:${callsign}`;
+  if (!state.chatTabOrder.includes(key)) state.chatTabOrder.push(key);
+  saveChatLayout();
   renderPrivateTabs();
 }
 
@@ -3271,11 +3408,15 @@ function openPrivateChat(peer) {
 function setActiveChatFilter(filter, peer = '') {
   // Changing tabs is model-first: update state, reset unread for selected
   // peer, then re-render tabs/composer/messages from that state.
+  syncChatLayout();
   state.filter = filter;
   state.privatePeer = filter === 'private-peer' ? normalizeCallsign(peer) : '';
   if (state.privatePeer && state.privatePeers.has(state.privatePeer)) {
     state.privatePeers.get(state.privatePeer).unread = 0;
+    state.privatePeers.get(state.privatePeer).hidden = false;
   }
+  if (filter !== 'private-peer') state.hiddenChatFilters.delete(filter);
+  saveChatLayout();
   renderPrivateTabs();
   updateChatTabs();
   updateComposerContext();
@@ -3285,23 +3426,186 @@ function setActiveChatFilter(filter, peer = '') {
 function renderPrivateTabs() {
   // Private tabs are derived from known peers, not stored as DOM state.
   // Closing a tab hides only that shortcut; chat history remains available
-  // in All and Private for the lifetime of the proxy session.
+  // in All (and received messages in For you) for the proxy session.
+  syncChatLayout();
+  // Replacing the touched DOM node mid-gesture loses touchend on mobile.
+  // Incoming messages still update the model; refresh shortcuts on release.
+  if (state.chatTabGestureActive) { state.chatTabsNeedRender = true; return; }
+  state.chatTabsNeedRender = false;
   const tabs = document.querySelector('.tabs');
-  const systemTab = tabs.querySelector('[data-filter="system"]');
   tabs.querySelectorAll('.private-peer-tab').forEach(tab => tab.remove());
 
-  for (const callsign of [...state.privatePeers.keys()].sort()) {
+  for (const callsign of state.privatePeers.keys()) {
     const meta = state.privatePeers.get(callsign) || {};
+    if (meta.hidden) continue;
     const button = document.createElement('button');
     button.className = `tab private-peer-tab${meta.unread ? ' unread' : ''}`;
     button.dataset.filter = 'private-peer';
     button.dataset.peer = callsign;
     button.innerHTML = `
       <span>${enc(meta.unread ? `${callsign} (${meta.unread})` : callsign)}</span>
-      <span class="tab-close" data-close-peer="${enc(callsign)}" title="Close chat">x</span>`;
-    tabs.insertBefore(button, systemTab);
+      <span class="tab-close" data-close-peer="${enc(callsign)}" title="Hide chat; messages and draft are kept">×</span>`;
+    button.title = `${callsign}. Press Delete to hide this tab without deleting messages.`;
+    tabs.appendChild(button);
+  }
+  for (const key of state.chatTabOrder) {
+    const button = [...tabs.querySelectorAll('.tab')].find(tab => chatTabKey(tab) === key);
+    if (!button) continue;
+    button.classList.toggle('hidden', state.hiddenChatFilters.has(key));
+    tabs.appendChild(button);
   }
   updateChatTabs();
+  if (state.activeSettingsTab === 'chat') renderChatSettings();
+}
+
+function chatTabKey(tab) {
+  return tab.dataset.filter === 'private-peer' ? `private:${tab.dataset.peer}` : tab.dataset.filter;
+}
+
+function syncChatLayout() {
+  const scope = JSON.stringify(state.remote.enabled
+    ? [state.remote.relay, state.remoteIdentity.userId || state.account.userId || '', state.remoteSelectedDeviceId]
+    : ['local']);
+  if (state.chatLayoutScope === scope) return;
+  const previous = state.chatLayoutScope;
+  state.chatLayoutScope = scope;
+  state.chatTabOrder = Object.keys(CHAT_FILTER_LABELS);
+  state.hiddenChatFilters = new Set();
+  state.draggedChatTab = '';
+  if (previous) state.privatePeers.clear();
+  state.chatLayoutSaved = true;
+  try {
+    const raw = localStorage.getItem(CHAT_LAYOUT_STORAGE_KEY + scope);
+    // Bounded, defensive reads also handle old/corrupt browser preferences.
+    const saved = raw && raw.length <= 65536 ? JSON.parse(raw) : {};
+    const validKey = key => typeof key === 'string' && (Object.hasOwn(CHAT_FILTER_LABELS, key)
+      || /^private:[A-Z0-9_]{1,32}$/.test(key));
+    const order = Array.isArray(saved?.order) ? saved.order.slice(0, 204).filter(validKey) : [];
+    state.chatTabOrder = [...new Set([...order, ...Object.keys(CHAT_FILTER_LABELS)])];
+    state.hiddenChatFilters = new Set((Array.isArray(saved?.hiddenFilters) ? saved.hiddenFilters : [])
+      .filter(key => key !== 'all' && Object.hasOwn(CHAT_FILTER_LABELS, key)));
+    for (const key of state.chatTabOrder) {
+      if (!key.startsWith('private:')) continue;
+      const peer = key.slice(8);
+      const hiddenAfter = saved?.hiddenPeers?.[peer];
+      const hidden = Number.isFinite(hiddenAfter) && hiddenAfter >= 0;
+      state.privatePeers.set(peer, { unread: 0, hidden, hiddenAfter: hidden ? hiddenAfter : 0 });
+    }
+  } catch (_) {
+    state.chatLayoutSaved = false;
+  }
+}
+
+function saveChatLayout() {
+  if (!state.chatLayoutScope) return;
+  try {
+    // Save bounded tab identifiers and hide watermarks only, not chat history.
+    const privateKeys = state.chatTabOrder.filter(key => key.startsWith('private:')).slice(-200);
+    const order = state.chatTabOrder.filter(key => !key.startsWith('private:') || privateKeys.includes(key));
+    const hiddenPeers = Object.fromEntries(privateKeys.map(key => key.slice(8))
+      .filter(peer => state.privatePeers.get(peer)?.hidden)
+      .map(peer => [peer, state.privatePeers.get(peer).hiddenAfter || 0]));
+    localStorage.setItem(CHAT_LAYOUT_STORAGE_KEY + state.chatLayoutScope, JSON.stringify({
+      order, hiddenFilters: [...state.hiddenChatFilters], hiddenPeers,
+    }));
+    state.chatLayoutSaved = true;
+  } catch (_) {
+    // Storage may be disabled/full. Layout still works for the current page.
+    state.chatLayoutSaved = false;
+  }
+}
+
+function reorderChatTab(key, targetKey) {
+  syncChatLayout();
+  const index = state.chatTabOrder.indexOf(key);
+  const target = state.chatTabOrder.indexOf(targetKey);
+  if (index < 0 || target < 0 || index === target) return;
+  state.chatTabOrder.splice(index, 1);
+  state.chatTabOrder.splice(target, 0, key);
+  saveChatLayout();
+  renderPrivateTabs();
+}
+
+function moveChatTab(key, offset) {
+  syncChatLayout();
+  const index = state.chatTabOrder.indexOf(key);
+  const target = index + offset;
+  if (![1, -1].includes(offset) || index < 0 || target < 0 || target >= state.chatTabOrder.length) return;
+  // Reordering must not select a conversation, reset unread, or change drafts.
+  reorderChatTab(key, state.chatTabOrder[target]);
+}
+
+function setChatFilterVisible(filter, visible) {
+  syncChatLayout();
+  if (filter === 'all' || !Object.hasOwn(CHAT_FILTER_LABELS, filter)) return;
+  if (visible) state.hiddenChatFilters.delete(filter);
+  else state.hiddenChatFilters.add(filter);
+  saveChatLayout();
+  if (!visible && state.filter === filter) setActiveChatFilter('all');
+  else renderPrivateTabs();
+}
+
+function renderChatSettings() {
+  syncChatLayout();
+  $('settings-chat-storage').textContent = state.chatLayoutSaved
+    ? 'Saved in this browser for this account and proxy. Refresh and proxy restarts keep the layout; other browsers have their own preferences.'
+    : 'Browser storage is unavailable. Changes will last only until this page is closed or refreshed.';
+  const list = $('settings-chat-list');
+  const focused = document.activeElement;
+  const focusKey = focused?.dataset.chatKey;
+  const focusAction = focused?.dataset.chatAction;
+  list.replaceChildren();
+  state.chatTabOrder.forEach((key, index) => {
+    const peer = key.startsWith('private:') ? key.slice(8) : '';
+    const meta = peer ? state.privatePeers.get(peer) : null;
+    if (peer && !meta) return;
+    const label = peer || CHAT_FILTER_LABELS[key];
+    const hidden = peer ? meta.hidden : state.hiddenChatFilters.has(key);
+    const row = document.createElement('div');
+    row.className = 'chat-layout-row';
+    const name = document.createElement('span');
+    name.className = 'chat-layout-name';
+    name.textContent = `${label}${hidden ? ' (hidden)' : ''}`;
+    row.appendChild(name);
+    const controls = document.createElement('div');
+    controls.className = 'chat-layout-controls';
+    const addButton = (action, text, description, disabled, handler) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.chatKey = key;
+      button.dataset.chatAction = action;
+      button.textContent = text;
+      button.setAttribute('aria-label', description);
+      button.title = description;
+      button.disabled = disabled;
+      button.onclick = handler;
+      controls.appendChild(button);
+    };
+    addButton('up', '↑', `Move ${label} earlier`, index === 0, () => moveChatTab(key, -1));
+    addButton('down', '↓', `Move ${label} later`, index === state.chatTabOrder.length - 1, () => moveChatTab(key, 1));
+    if (peer) {
+      addButton('visibility', hidden ? 'Show' : '×', `${hidden ? 'Show' : 'Hide'} ${label} chat`, false, () => {
+        if (!hidden) closePrivateChat(peer);
+        else {
+          meta.hidden = false;
+          saveChatLayout();
+          renderPrivateTabs();
+        }
+      });
+    } else {
+      addButton('visibility', key === 'all' ? 'Always shown' : hidden ? 'Show' : 'Hide',
+        key === 'all' ? 'All is always shown' : `${hidden ? 'Show' : 'Hide'} ${label} filter`, key === 'all', () => setChatFilterVisible(key, hidden));
+    }
+    row.appendChild(controls);
+    list.appendChild(row);
+  });
+  // Keep keyboard focus through a reorder and live arrivals while Settings is open.
+  if (focusKey) {
+    const candidates = [...list.querySelectorAll('button')].filter(button => button.dataset.chatKey === focusKey);
+    const target = candidates.find(button => button.dataset.chatAction === focusAction && !button.disabled)
+      || candidates.find(button => !button.disabled);
+    if (target) target.focus();
+  }
 }
 
 function updateChatTabs() {
@@ -3326,17 +3630,21 @@ function updateComposerContext() {
       select.prepend(option);
     }
     option.value = `private:${state.privatePeer}`;
-    option.textContent = `Private: ${state.privatePeer}`;
+    option.textContent = `${isWeatherChat(state.privatePeer) ? 'Weather' : 'Private'}: ${state.privatePeer}`;
     select.value = option.value;
     select.disabled = true;
-    $('message-input').placeholder = `Private message to ${state.privatePeer}`;
+    $('message-input').placeholder = isWeatherChat(state.privatePeer)
+      ? `.${state.privatePeer.toLowerCase()} ICAO, for example .${state.privatePeer.toLowerCase()} LIMC`
+      : `Private message to ${state.privatePeer}`;
+    syncComposerDraft();
     return;
   }
 
   if (option) option.remove();
   select.disabled = false;
-  if (select.value.startsWith('private:')) select.value = '@22800';
+  select.value = state.chatRecipient;
   $('message-input').placeholder = 'Message or command: .metar LIMC, .taf LIRF, .chat CALLSIGN';
+  syncComposerDraft();
 }
 
 function messageMatchesCurrentTab(msg) {
@@ -3344,7 +3652,10 @@ function messageMatchesCurrentTab(msg) {
   // cannot disagree about what the active tab contains.
   if (!isRelevantFrequencyMessage(msg)) return false;
   if (state.filter === 'all') return true;
-  if (state.filter === 'private-peer') return msg.type === 'private' && privatePeerForMessage(msg) === state.privatePeer;
+  if (state.filter === 'for-you') {
+    return (msg.type === 'private' && msg.direction !== 'outgoing') || isMessageAddressedToMe(msg);
+  }
+  if (state.filter === 'private-peer') return privatePeerForMessage(msg) === state.privatePeer;
   return msg.type === state.filter;
 }
 
@@ -3371,12 +3682,22 @@ function isRelevantFrequencyMessage(msg) {
 
 function closePrivateChat(peer) {
   // The X closes only the conversation tab. Messages must stay in the common
-  // history so closing a shortcut cannot erase All or Private.
+  // history so closing a shortcut cannot erase All or For you.
+  syncChatLayout();
   const callsign = normalizeCallsign(peer);
   if (!callsign) return;
-  state.privatePeers.delete(callsign);
+  const meta = state.privatePeers.get(callsign);
+  if (meta) {
+    meta.hidden = true;
+    // Compare recovered messages with the last observed source timestamp,
+    // rather than the browser clock, which may differ from the proxy clock.
+    const timestamps = state.messages.filter(msg => privatePeerForMessage(msg) === callsign)
+      .map(msg => Date.parse(msg.timestamp)).filter(Number.isFinite);
+    meta.hiddenAfter = timestamps.length ? Math.max(...timestamps) : Date.now();
+  }
+  saveChatLayout();
   if (state.filter === 'private-peer' && state.privatePeer === callsign) {
-    state.filter = 'private';
+    state.filter = state.hiddenChatFilters.has('for-you') ? 'all' : 'for-you';
     state.privatePeer = '';
   }
   renderPrivateTabs();
@@ -3609,6 +3930,10 @@ function bindUi() {
     updateSettingsView();
   };
   $('message-input').addEventListener('keydown', handleComposerKeydown);
+  $('recipient').addEventListener('change', () => {
+    state.chatRecipient = $('recipient').value;
+    syncComposerDraft();
+  });
   $('message-input').addEventListener('input', updateCommandMenu);
   $('message-input').addEventListener('focus', updateCommandMenu);
   $('message-input').addEventListener('blur', () => setTimeout(hideCommandMenu, 120));
@@ -3659,6 +3984,7 @@ function bindUi() {
     send({ action: 'test_audio' });
   };
   $('rx-activation-prompt').onclick = () => ensureAudio().catch(() => {});
+  $('rx-mute').onclick = toggleRxMute;
   $('settings-notifications-enable').onclick = enableNotifications;
   $('settings-notifications-disable').onclick = disableNotifications;
   $('settings-notifications-online').onchange = setNotificationOnlinePreference;
@@ -3686,6 +4012,155 @@ function bindUi() {
     if (!button) return;
     setActiveChatFilter(button.dataset.filter, button.dataset.peer || '');
   };
+  document.querySelector('.tabs').addEventListener('keydown', event => {
+    const tab = event.target.closest('.private-peer-tab');
+    if (event.key !== 'Delete' || !tab) return;
+    event.preventDefault();
+    closePrivateChat(tab.dataset.peer);
+    document.querySelector('.tab.active')?.focus();
+  });
+  bindChatTabDrag();
+  renderPrivateTabs();
+}
+
+function bindChatTabDrag() {
+  const tabs = document.querySelector('.tabs');
+  let start = null;
+  let targetKey = '';
+  let suppressClick = false;
+  let holdTimer = null;
+  let scrollTimer = null;
+  let point = null;
+  const clear = () => {
+    clearTimeout(holdTimer);
+    clearTimeout(scrollTimer);
+    holdTimer = scrollTimer = null;
+    const released = start;
+    start = null;
+    if (released?.kind === 'mouse' && tabs.hasPointerCapture(released.id)) tabs.releasePointerCapture(released.id);
+    state.draggedChatTab = '';
+    state.chatTabGestureActive = false;
+    start = null;
+    targetKey = '';
+    point = null;
+    tabs.querySelectorAll('.tab').forEach(tab => tab.classList.remove('drag-target', 'dragging', 'drag-before', 'drag-after'));
+    if (state.chatTabsNeedRender) renderPrivateTabs();
+  };
+  const hitTarget = () => {
+    if (!point) return;
+    const tab = document.elementFromPoint(point.x, point.y)?.closest('.tab');
+    targetKey = tab && tabs.contains(tab) ? chatTabKey(tab) : '';
+    const after = state.chatTabOrder.indexOf(targetKey) > state.chatTabOrder.indexOf(state.draggedChatTab);
+    tabs.querySelectorAll('.tab').forEach(item => {
+      const target = item === tab && targetKey !== state.draggedChatTab;
+      item.classList.toggle('drag-target', target);
+      item.classList.toggle('drag-after', target && after);
+      item.classList.toggle('drag-before', target && !after);
+    });
+  };
+  const scrollAtEdge = () => {
+    scrollTimer = null;
+    if (!state.draggedChatTab || !point) return;
+    const bounds = tabs.getBoundingClientRect();
+    if (point.y < bounds.top || point.y > bounds.bottom || point.x < bounds.left || point.x > bounds.right) return;
+    const direction = point.x < bounds.left + 30 ? -1 : point.x > bounds.right - 30 ? 1 : 0;
+    if (!direction) return;
+    tabs.scrollLeft += direction * 12;
+    hitTarget();
+    scrollTimer = setTimeout(scrollAtEdge, 50);
+  };
+  const activate = () => {
+    holdTimer = null;
+    if (!start || start.scope !== state.chatLayoutScope || document.hidden) { clear(); return; }
+    state.draggedChatTab = start.key;
+    tabs.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('dragging', chatTabKey(tab) === start.key));
+    if (start.kind === 'mouse') tabs.setPointerCapture(start.id);
+    hitTarget();
+  };
+  const begin = (tab, kind, id, x, y) => {
+    clear();
+    suppressClick = false;
+    start = { key: chatTabKey(tab), kind, id, x, y, scope: state.chatLayoutScope };
+    point = { x, y };
+    state.chatTabGestureActive = true;
+    if (kind === 'touch') holdTimer = setTimeout(activate, 400);
+  };
+  const move = (x, y, event) => {
+    if (!start || start.scope !== state.chatLayoutScope) { clear(); return; }
+    point = { x, y };
+    if (!state.draggedChatTab) {
+      const distance = Math.hypot(x - start.x, y - start.y);
+      if (start.kind === 'touch') {
+        // Moving before the hold completes belongs to normal page/tab scrolling.
+        if (distance > 8) clear();
+        return;
+      }
+      if (distance < 6) return;
+      activate();
+    }
+    if (event.cancelable === false) { clear(); return; }
+    event.preventDefault();
+    hitTarget();
+    if (scrollTimer === null) scrollAtEdge();
+  };
+  const finish = event => {
+    const key = state.draggedChatTab;
+    const target = targetKey;
+    suppressClick = Boolean(key);
+    if (key && event.cancelable !== false) event.preventDefault();
+    clear();
+    if (key && target) reorderChatTab(key, target);
+  };
+  // Pointer events handle mouse dragging. Touch events let the first movement
+  // remain native scrolling unless the 400ms hold has armed reorder mode.
+  // Changing touch-action after pointerdown cannot change that gesture's policy.
+  tabs.addEventListener('pointerdown', event => {
+    suppressClick = false;
+    const tab = event.target.closest('.tab');
+    if (event.pointerType !== 'mouse' || event.button !== 0 || !tab || event.target.closest('[data-close-peer]')) return;
+    begin(tab, 'mouse', event.pointerId, event.clientX, event.clientY);
+  });
+  tabs.addEventListener('pointermove', event => {
+    if (start?.kind === 'mouse' && event.pointerId === start.id) move(event.clientX, event.clientY, event);
+  });
+  document.addEventListener('pointerup', event => {
+    if (start?.kind === 'mouse' && event.pointerId === start.id) finish(event);
+  });
+  tabs.addEventListener('pointercancel', () => { if (start?.kind === 'mouse') clear(); });
+  tabs.addEventListener('lostpointercapture', () => { if (start?.kind === 'mouse') clear(); });
+  tabs.addEventListener('touchstart', event => {
+    suppressClick = false;
+    const tab = event.target.closest('.tab');
+    if (event.touches.length !== 1 || !tab || event.target.closest('[data-close-peer]')) { clear(); return; }
+    const touch = event.touches[0];
+    begin(tab, 'touch', touch.identifier, touch.clientX, touch.clientY);
+  }, { passive: true });
+  tabs.addEventListener('touchmove', event => {
+    if (start?.kind !== 'touch') return;
+    if (event.touches.length !== 1) { clear(); return; }
+    const touch = event.touches[0];
+    if (touch.identifier === start.id) move(touch.clientX, touch.clientY, event);
+  }, { passive: false });
+  tabs.addEventListener('touchend', event => {
+    if (start?.kind === 'touch' && [...event.changedTouches].some(touch => touch.identifier === start.id)) finish(event);
+  }, { passive: false });
+  tabs.addEventListener('touchcancel', clear);
+  document.addEventListener('touchstart', event => {
+    if (start?.kind === 'touch' && event.touches.length > 1) clear();
+  }, { passive: true });
+  tabs.addEventListener('contextmenu', event => { if (start?.kind === 'touch') event.preventDefault(); });
+  window.addEventListener('blur', clear);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) clear(); });
+  tabs.addEventListener('click', event => {
+    if (!suppressClick) return;
+    suppressClick = false;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+  tabs.addEventListener('dragstart', event => {
+    // Do not let text selection/native dragging take over the pointer gesture.
+    event.preventDefault();
+  });
 }
 
 function bindAudioUnlock() {
@@ -3886,6 +4361,21 @@ if (globalThis.__VOXHF_FRONTEND_TEST__ === true) {
     messageMatchesCurrentTab,
     isRelevantFrequencyMessage,
     closePrivateChat,
+    moveChatTab,
+    reorderChatTab,
+    bindChatTabDrag,
+    syncChatLayout,
+    setChatFilterVisible,
+    renderChatSettings,
+    openPrivateChat,
+    submitMessage,
+    syncComposerDraft,
+    updateComposerContext,
+    isMessageAddressedToMe,
+    toggleRxMute,
+    handleIncomingPcm,
+    playPcm,
+    playBrowserTestTone,
   };
 } else {
   initializeApp();

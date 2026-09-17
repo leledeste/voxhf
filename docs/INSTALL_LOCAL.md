@@ -42,7 +42,7 @@ The Node version must be 24 or newer and both ffmpeg searches must list Speex.
 ## Install From The Release ZIP
 
 1. Download `voxhf-local-<version>.zip` from the
-   [latest release](https://github.com/leledeste/voxhf/releases/latest).
+   [releases page](https://github.com/leledeste/voxhf/releases) (choose the newest beta).
 2. Extract the complete archive to a normal user folder, for example
    `C:\Users\YourName\VoxHF`. Do not run it from inside the ZIP.
 3. Double-click `start.bat`.
@@ -63,7 +63,7 @@ VoxHF as they are announced. Do not enter these addresses in PilotUI or add
 firewall/hosts-file rules for them: PilotUI still uses the printed simulator
 IPv4 address. After upgrading from the shared-address voice proxy, close and
 reopen PilotCore/Altitude as well as VoxHF to clear old voice destinations.
-Live compatibility testing for this unreleased routing change is described in
+Live compatibility testing for the routing introduced in 0.1.2-beta.3 is described in
 [Voice Routing Diagnostics](VOICE_ROUTING_DIAGNOSTICS.md).
 
 `config.json` contains private settings and, in remote mode, an agent token.

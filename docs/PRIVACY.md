@@ -79,6 +79,17 @@ Stopping the proxy clears memory-only history and timers. Notification
 credentials remain until the user disables/removes them or deletes the private
 state. Audio is never recorded.
 
+## Browser Chat Preferences
+
+The operational webapp stores chat-tab order and visibility in browser local
+storage, separated by local mode or remote relay/account/agent identity. This
+includes up to 200 private callsign-tab identifiers per scope and timestamps
+used to avoid reopening hidden tabs when old history is recovered. No message
+bodies, drafts, or audio are stored with these preferences, and they are not
+uploaded or synchronized to other browsers. They remain until site data is
+cleared; proxy restart does not remove them. Browser storage is local to that
+browser profile, not encrypted account storage. Drafts remain page-memory only.
+
 ## Default Lifetimes
 
 | Data | Default lifetime |

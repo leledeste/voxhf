@@ -15,8 +15,12 @@ transponder controls, messages, route weather, notifications, and remote access.
 
 - COM1 and COM2 tuning, distance-sorted online stations, and permanent UNICOM
   `122.800` access.
-- Live IVAO RX and browser-microphone TX on desktop and mobile devices.
+- Live TS2 ATC RX and browser-microphone TX on desktop and mobile devices;
+  official Voice UNICOM is not yet supported.
 - Frequency, broadcast, and private messages with command completion.
+- For you filtering and amber callsign highlights, page-only unsent drafts,
+  and browser-saved tab ordering/visibility with non-destructive close.
+- A compact browser RX mute control, independent of TX and notifications.
 - Squawk, STBY/ALT, and IDENT controls.
 - Flight-plan departure/destination plus METAR, TAF, ATIS requests, route
   weather, and optional plain-language weather interpretation.

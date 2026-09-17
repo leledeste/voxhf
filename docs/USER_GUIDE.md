@@ -67,9 +67,22 @@ station discovery, or voice routing. Messages you send remain visible.
 
 ## Voice Receive (RX)
 
+Browser voice currently covers TS2 ATC channels. Official IVAO Voice UNICOM is
+not yet supported in VoxHF; use Altitude for UNICOM voice. UNICOM text and the
+three-minute reminder remain available.
+
 RX is enabled by default. When decoded voice reaches the browser, the **RX**
 indicator in the top bar lights up. More than one connected browser can listen
 at the same time.
+
+Select the **speaker icon** beside the Radios title to silence this page when
+listening through Altitude instead. The icon turns red with a diagonal slash;
+select it again to unmute. Its tooltip and accessible label describe the action,
+and the top-bar Audio caption becomes **Muted**. RX activity remains visible. Browser TX, radio
+tuning, chat, Push notifications, Altitude audio, and other browser devices are
+unaffected. The choice lasts only for this page: refreshing restores audible RX.
+Audio received while muted is discarded, not replayed when unmuting. RX test
+tones and received monitor playback are also silent until you unmute.
 
 Desktop browsers normally start playback without another action. Safari on a
 newly loaded iPhone or iPad document requires a trusted user gesture before it
@@ -83,6 +96,9 @@ To verify the browser output without waiting for a controller:
 1. Open **Settings > Audio**.
 2. Select **Test RX**.
 3. Confirm that the test tone is audible and **Audio Output** is active.
+
+If the page is muted, select the crossed-out speaker before testing. Unmuting can also
+provide the trusted gesture needed by iOS; it does not bypass browser policy.
 
 If the desktop hears voice but a phone does not, use the troubleshooting steps
 at the end of this guide before changing proxy audio parameters.
@@ -129,14 +145,61 @@ The tabs above the message area are:
 
 - **All**: every message relevant to the current browser view;
 - **Frequency**: relevant COM/UNICOM frequency messages;
-- **Private**: all private conversations;
+- **For you**: received private messages and public messages beginning with your
+  active callsign, subject to the same frequency visibility rules;
 - **System**: local status, weather-request acknowledgements, and server/system
   messages.
 
 An incoming private message creates a callsign tab. Closing that tab with its
-`X` hides the conversation tab but does not delete its messages from **All** or
-**Private**. Opening the callsign again restores the same current-session
-conversation.
+`X` hides the conversation tab but does not delete its messages from **All**;
+received messages also remain in **For you**. Closing the active private tab
+opens **For you**, or **All** if For you is hidden. Opening the callsign again restores the retained conversation,
+including sent replies. To reply privately, open that callsign tab or explicitly
+choose the recipient: **For you** is only a history filter, not a send destination.
+
+Incoming frequency and broadcast messages beginning with your active callsign
+receive a subtle amber accent and a **For you** label, distinct from your teal
+outgoing messages. Matching ignores case and leading whitespace, but requires
+the complete callsign: `RYR12` does not
+match `RYR123`. Mentions later in the text, sent messages, and private messages
+do not receive this extra highlight. Frequency visibility rules still apply.
+This works without notification permission, including recovered history; if
+your active callsign changes, the highlights are recalculated for that callsign.
+
+### Organize Chat Tabs
+
+Drag tabs with a mouse to change their order, including the built-in filters.
+On touch screens, hold a tab still for about **400 ms** until it is highlighted,
+then drag it to the insertion marker and release. A quick tap still selects;
+swiping before the hold completes scrolls normally. Holding near an edge while
+dragging scrolls the strip. The X is excluded, and multi-finger/cancelled gestures
+do not reorder. **Settings > Chat** also provides up/down arrows for touch and
+keyboard users to move a tab earlier/later in the strip. New private tabs
+appear at the end; reopening a hidden tab retains its previous place.
+
+Settings lets you hide **Frequency**, **For you**, and **System**; **All** always
+remains available. Hiding the active filter returns to All without changing the
+public recipient or draft. Moving tabs never changes the active conversation,
+recipient, draft, unread count, or message reading position.
+
+The **X** on a private tab only hides it: it does not delete any messages or
+its unsent draft. You can also press Delete while the private tab has keyboard
+focus. Reopen it with `.chat CALLSIGN` or **Show** in Settings > Chat. A new
+incoming private message makes it reappear without selecting it. Old recovered
+history does not undo hiding; a newer received message recovered after an
+absence can reveal it. Closing a tab does not disable its Push notifications.
+
+Order and visibility are saved in this browser and survive page refresh,
+browser reopening, and proxy restart. Local mode and each remote
+relay/account/selected-agent combination have separate preferences; they do
+not synchronize to another browser or device. Up to 200 private-tab identifiers
+are retained, without message contents or drafts. Clearing site data removes
+these preferences. If browser storage is unavailable, Settings warns that the
+layout only lasts for the current page.
+
+This does not extend message or draft retention: a proxy restart still clears
+session history, and a page refresh still clears unsent drafts. A saved private
+tab can therefore reopen with no messages after a proxy restart.
 
 ### Send A Message
 
@@ -157,6 +220,30 @@ WZZ2807, contact EPRZ_TWR on 126.805, good day
 
 Only messages actually addressed to the selected recipient are sent. The
 browser never receives a raw FSD command tunnel.
+
+### Unsent Drafts
+
+Each private callsign has its own draft. UNICOM / frequency, Broadcast, and
+Custom each have a separate draft too. Switching between All, Frequency,
+For you, and System changes the history filter, not the current recipient or
+its draft. Closing a private tab keeps its draft for when you reopen that
+callsign. Returning from a private tab also restores the previous public
+recipient choice. Changing COM frequencies does not retarget the composer:
+UNICOM / frequency still sends to `122.800`.
+
+For example, write a traffic report without sending it, open a private callsign
+tab and start a reply, then return to All: the traffic report is still there.
+Submitting one draft does not clear the others. Cancelling Custom or trying to
+send while the transport is unavailable keeps the text. Custom asks for the
+destination at send time; it is one draft for that selector mode, not a separate
+draft for every destination entered in the prompt.
+
+Drafts stay in memory in the current browser page, isolated by selected remote
+agent and account. Reconnecting the same agent keeps them, but refreshing or
+closing the page clears them. They are not synchronized across devices or stored
+by the proxy, relay, or account. This differs from session history below.
+A submitted draft clears when the browser passes it to its connection, not
+after confirmation from IVAO; a later delivery error does not restore it.
 
 ### Session History
 
@@ -215,6 +302,25 @@ recognized. Unknown groups remain under **Not interpreted**; supplementary
 
 For an airport outside the flight plan, use `.metar`, `.taf`, or `.atis` in the
 message box.
+
+### METAR And TAF Chat Tabs
+
+A successful `.metar ICAO` (or `.wx ICAO`) request opens/selects the single
+**METAR** tab; `.taf ICAO` does the same for **TAF**. New reports append to that
+tab's retained session history, including reports for different airports.
+Closing with X only hides the tab. The next explicit request reopens it in its
+saved position without deleting earlier reports or creating another tab.
+
+If you close the tab or select another chat while waiting, the reply makes the
+weather tab visible and marks it unread but never switches your active chat.
+Old recovered history respects saved hiding, as with other tabs. Both local
+and remote weather replies are system messages, visible in All/System and their
+weather tab, not private messages in For you. The weather composer accepts
+commands rather than sending ordinary text to the METAR/TAF service identity.
+
+Requests made with **Route weather** card buttons remain in that panel and do
+not select a chat. No automatic weather polling or additional permanent history
+is introduced; stopping the proxy still clears its bounded session history.
 
 ## Three-Minute Timer
 
@@ -345,6 +451,8 @@ flight.
   password, and token controls.
 - **Notifications**: support, permission, saved subscriptions, enable/disable,
   online confirmation, and PC/proxy offline alert.
+- **Chat**: reorder tabs and show/hide filters and conversations; layout is
+  saved in this browser, not synchronized to other devices.
 - **About**: version, license, source, and privacy summary.
 
 Settings is a scroll-contained modal. Scrolling inside it must not move the
@@ -375,7 +483,7 @@ workspace behind it.
 | Notifications say unsupported on iOS | Open the HTTPS app from its Home Screen icon, not a normal Safari tab. |
 | Notification permission is denied | Re-enable VoxHF in the operating system's notification settings. |
 | Remote agent is offline | Check the proxy console, relay URL/token, internet access, and **Settings > Remote > Check Remote**. |
-| Private-tab `X` appears to remove messages | Open **All** or **Private**; the `X` closes only that peer tab. |
+| Private-tab `X` appears to remove messages | Open **All** for the full history or **For you** for received private messages; `X` closes only that peer tab. |
 | METAR/TAF is cut off on a phone | Scroll the Route weather panel/page; use the command form as a fallback. |
 
 For repeatable diagnostics and automated tests, use

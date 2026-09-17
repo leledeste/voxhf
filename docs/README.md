@@ -41,6 +41,10 @@ Choose the path that matches what you are doing.
 - [Security Audit](SECURITY_AUDIT.md): dated internal review baseline.
 - [Roadmap](ROADMAP.md): limitations and planned work. Released behavior belongs
   in the [Changelog](../CHANGELOG.md).
+- [Feature Plans](FEATURE_PLANS.md): preserved design decisions and open questions
+  for chat drafts/aliases, addressed messages, ATC names/contact logs, RX speaker
+  identity, checklists, and flight tools. Implemented baselines are marked with
+  their release version; the remaining proposals are not shipped features.
 - [Voice Integration Research](VOICE_RESEARCH.md): preserved findings and
   decision gates for official Voice UNICOM and a possible live IVAO listening
   service.

@@ -1,8 +1,8 @@
 # VoxHF Technical Paper
 
-Version: 0.1.2 Beta (`0.1.2-beta.1`)
+Version: 0.1.2 Beta (`0.1.2-beta.4`)
 Status: public beta architecture
-Date: 2026-08-05
+Date: 2026-09-17
 
 ## Abstract
 
@@ -144,15 +144,19 @@ The UI provides:
 - COM1/COM2 frequency inputs and station dropdowns.
 - TX buttons inside each COM card.
 - Web TX readiness state.
+- Page-local RX mute stops tracked playback sources and drops muted PCM without
+  suspending the RX context or touching the separate TX path. A playback epoch
+  also discards frames awaiting resume across mute/unmute. iOS gesture and
+  foreground recovery remain active; no audio is retained for later playback.
 - XPDR squawk, `STBY`, `ALT`, and IDENT controls.
-- Chat tabs for all messages, frequency messages, private messages, and
-  per-peer private chats.
+- Chat tabs for All, Frequency, For you (received private and callsign-addressed
+  public messages), System, and complete per-peer private conversations.
 - Current-session chat recovery after local or remote browser reconnect.
 - Dot-command autocomplete.
 - Route departure/destination weather, requests, and interpretation.
 - A proxy-owned synchronized three-minute timer.
 - Per-device Web Push preferences and status.
-- Settings panels for audio, connection, remote access, notifications, and
+- Settings panels for audio, connection, remote access, notifications, chat, and
   about.
 
 ### 4.3 `apps/relay`
@@ -214,9 +218,10 @@ and reduces accidental leakage of protocol internals.
 
 ### 5.3 TS2 Redirect and Proxy
 
-When IVAO announces a TS2 voice server, VoxHF rewrites the voice server
-address to the local network IP selected at startup. PilotCore then sends TS2
-voice traffic through VoxHF.
+When IVAO announces a TS2 voice server, VoxHF rewrites its address to a stable
+per-server loopback endpoint on port 8767. PilotCore then sends TS2 traffic
+through that endpoint; discovery of another server cannot retarget the active
+connection. Section 9 details route selection and endpoint lifetime.
 
 VoxHF forwards TS2 traffic to the real server and inspects the packet class
 needed for voice receive and transmit session caching.
@@ -387,8 +392,9 @@ from an old RX decoder cannot affect its replacement.
 This private-protocol behavior requires live regression testing. In particular,
 the Windows local smoke test supports automatic/loopback source binding, but a
 separate probe with an explicitly LAN-bound UDP source did not receive a reply.
-Altitude's binding and cross-server reconnection must therefore be validated
-before release; simulated Ready state is not proof of a successful join. See
+The tested Altitude setup has passed live cross-server RX/TX checks, but other
+client bindings still need validation; simulated Ready state is not proof of
+a successful join. See
 [Voice Routing Diagnostics](VOICE_ROUTING_DIAGNOSTICS.md).
 
 ## 10. Remote Access Architecture
@@ -495,6 +501,30 @@ The local agent is the source of truth for both features:
 - Message ids let the browser merge live traffic and recovered history without
   duplicates.
 - Recovery never checks notification permission or Push API availability.
+
+Chat layout is a separate browser-owned preference, stored under a versioned
+local-storage key scoped to local mode or relay/account/agent. Only tab order,
+hidden filters, and up to 200 private identifiers/hide timestamp watermarks are
+persisted; messages and drafts are not. History replay is explicitly marked so
+old recovered messages do not reopen hidden tabs. Fresh incoming traffic, or
+recovered traffic newer than the last observed source timestamp at hiding,
+reveals a private tab without selecting it. Browser storage failure falls back
+to page-memory layout with a Settings warning. Mouse pointer dragging and
+Settings arrows use the same reorder function without touching message state.
+Touch uses a 400 ms stationary hold and non-passive touchmove cancellation only
+once dragging is armed; early swipes retain native scrolling. Changing
+`touch-action` after a gesture starts cannot change its browser policy (see
+[MDN touch-action](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/touch-action)
+and [TouchEvent](https://developer.mozilla.org/en-US/docs/Web/API/TouchEvent)).
+Tab DOM refresh is deferred during gestures to retain the touched target;
+cancel/end clears timers and flushes pending updates. Real Safari touch testing
+remains necessary in addition to the synthetic gesture regressions.
+
+METAR/TAF service identities reuse the tab model while remaining system
+messages in both local and remote views. Explicit successful command requests
+select the existing service tab; responses only reveal it. Route weather
+panel replies keep their separate path. No weather history is duplicated or
+persisted, and ordinary composer text is not sent to weather service identities.
 
 Each browser installation creates its own Push API subscription after an
 explicit user action. The authenticated relay transports subscription changes

@@ -37,8 +37,9 @@ are in [infra/docker/defaults.env](../../infra/docker/defaults.env).
 | `sqlite-fallback` | SQLite plus env tokens | Temporary migration/testing |
 | `sqlite` | Active hashed SQLite agent tokens | Account deployment |
 
-Account login/registration requires SQLite mode and
-`VOXHF_RELAY_ENABLE_REGISTRATION=true`. Registration is invite-only by default.
+Account login requires `sqlite-fallback` or `sqlite` mode. New registration also
+requires `VOXHF_RELAY_ENABLE_REGISTRATION=true` and is invite-only by default;
+disabling registration does not disable existing account login.
 Pilot and admin browser sessions use separate HttpOnly cookies. The Node agent
 uses `Authorization: Bearer <token>` during the WebSocket upgrade.
 

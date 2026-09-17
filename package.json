@@ -1,6 +1,6 @@
 {
   "name": "voxhf",
-  "version": "0.1.2-beta.3",
+  "version": "0.1.2-beta.4",
   "description": "Local IVAO Altitude bridge with browser radio, chat and voice controls.",
   "main": "proxy.js",
   "license": "AGPL-3.0-only",

@@ -33,6 +33,17 @@ explicit limitations for any beta released before full live coverage.
 
 ## Clean Windows PC
 
+### 0.1.2-beta.4 Acceptance
+
+The beta tester confirmed chat ordering/hiding persistence, touch reordering,
+non-destructive private-tab closure and draft recovery, and METAR/TAF tab reuse.
+Live callsign highlighting and browser RX mute were also confirmed. The final
+amber-only styling adjustment was reviewed in desktop/mobile viewports and
+both themes; it does not change message matching. These results supplement,
+not replace, the automated and package checks below or future regression runs.
+
+### Installation And Flight Checks
+
 Use a second PC, Windows Sandbox, or a clean virtual machine. Do not clone the
 repository and do not copy `node_modules` from the development PC.
 
@@ -65,11 +76,52 @@ repository and do not copy `node_modules` from the development PC.
    appears on desktop, then verify PC plus mobile RX simultaneously. Repeat
    after browser standby: automatic recovery should remain silent when it
    succeeds, while a failed iOS recovery should show the prompt again.
+   While receiving voice, select the speaker icon beside Radios: it must turn
+   red and crossed out, with an Unmute accessible label, and this page must become
+   silent immediately while Altitude and another browser still hear RX. Verify
+   Web TX and Push still work. Unmute and check only fresh audio plays. Repeat
+   mute/unmute around iOS standby/recovery; refresh must restore audible RX
+   (with the normal iOS activation gesture). Unmute before testing RX tones.
 10. Refresh both devices and verify that the current proxy session's chat is
    recovered even when notification permission is disabled on one of them.
    Scroll up in a long chat and receive another message: the reading position
    must remain stable. Scroll back to the bottom and verify new messages are
    followed automatically; selecting another tab should open its latest messages.
+   Write distinct unsent texts in UNICOM, Broadcast, and two private tabs.
+   Switch tabs, close/reopen a private tab, and verify each draft and recipient.
+   Submit one draft and check the others remain; `.chat CALLSIGN` must not clear
+   the destination's draft. Cancel Custom and verify nothing is sent. Test a
+   disconnected send, reconnect without refreshing, and check the text remains.
+   Switching remote agents must isolate drafts; a page refresh must clear them
+   without affecting recovered chat history. Repeat on desktop and mobile.
+   With notifications disabled, receive public messages beginning with your
+   callsign: check the accent and For you label in both themes and on mobile.
+   A longer callsign sharing the prefix, a mention later in the text, outgoing
+   messages, and private messages must not receive that highlight. Confirm
+   untuned frequencies remain filtered and recovered history is highlighted.
+   Select For you: only received private and addressed public messages should
+   appear, without changing the composer recipient/draft. Open a private tab to
+   see both directions, close it to return to For you, and check All still has
+   sent replies. Repeat after history recovery and a callsign change.
+   Drag built-in and private tabs on desktop; use Settings > Chat arrows on
+   mobile and with the keyboard. Check active recipient, drafts, unread counts,
+   and reading position stay unchanged. Hide optional filters (All must remain)
+   and close a private tab with X/Delete: history and drafts must remain.
+   Reopen through Settings or .chat; verify its saved place. Refresh and restart
+   the proxy: order/visibility persist, but drafts/history retain their existing
+   lifetimes. Old history must not reopen hidden tabs; fresh incoming private
+   messages must. Test per-account/agent preference isolation and unavailable
+   browser storage, without expecting cross-device preference synchronization.
+   On real iPhone/iPad, hold a tab for about 400 ms then drag: verify source
+   highlighting, insertion marker, edge scrolling, and saved order. Quick taps
+   must select and quick swipes must scroll; X, multi-touch, gesture cancellation,
+   and standby must not accidentally move/select tabs. Receive a message during
+   the hold/drag and verify the gesture completes and the new tab is then shown.
+   Request a METAR, hide its tab, request another airport, and verify the same
+   tab reopens with both reports. Repeat for TAF and local/remote connections.
+   Close or switch tabs before the reply: it must reveal/unread the weather tab
+   without stealing selection or drafts. Invalid/disconnected requests must
+   retain input and not open a tab. Route weather requests must remain panel-only.
 11. Enable notifications separately on supported test devices, send a real
     private message, lock the mobile screen, and verify delivery. Also verify a
     public message beginning with the active callsign when a controller test is
@@ -99,6 +151,10 @@ It covers backup creation/verification failures, helper installation failures,
 and successful update ordering without touching a deployment. A POSIX shell is
 required; Windows without Git's shell reports a skip, while Linux CI requires
 the test to run. Keep the real SQLite backup/restore tests as a separate check.
+
+The harness normalizes Windows `Path`/`PATH` variants and checks tool resolution
+inside the shell before invoking the deployment script. A missing stub must
+abort the test rather than fall back to a real Git, Docker, or curl executable.
 
 - Hosted Webapp: deploy only its extracted `webapp` folder to a test HTTPS host.
 - Server: deploy only the Server ZIP to a clean Linux VM with Docker Compose.

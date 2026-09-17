@@ -2,6 +2,46 @@
 
 All notable VoxHF changes are recorded here.
 
+## Unreleased
+
+## 0.1.2-beta.4 - 2026-09-17
+
+### Added
+
+- Added persistent browser-local chat-tab ordering by mouse drag, touch
+  hold-and-drag, or touch/keyboard controls in Settings > Chat. Optional filters can be hidden while All stays
+  available. Private tabs use X to hide without deleting history or drafts;
+  new incoming messages reveal them in their saved position, while old history
+  recovery preserves hiding. Preferences are separate per remote account/agent.
+- METAR/TAF commands reopen and select their existing weather tab, retaining
+  earlier session reports. Late replies reveal the tab without switching away
+  from another conversation; Route weather requests remain panel-only.
+- Added a page-local speaker control beside Radios, red and crossed out when muted. It silences
+  queued and incoming web playback without affecting TX, Push, Altitude, or
+  other browsers. Muted audio is not replayed; refreshing restores audible RX.
+- Replaced the aggregate Private chat filter with For you: received private
+  messages plus public messages beginning with the active callsign. Individual
+  private chats retain sent replies and their drafts; filtering never retargets
+  the composer. Closing the active private tab opens For you without deleting history.
+- Added a subtle amber accent and a `For you` label, distinct from teal outgoing
+  messages, to incoming public messages
+  beginning with the active callsign, including recovered chat history.
+  Matching follows the Push prefix rule and does not change frequency filters.
+- Added page-memory chat drafts per private callsign and public recipient mode.
+  Switching or closing tabs preserves unsent text, and submitting one draft
+  leaves others untouched. Drafts are isolated by remote agent and account;
+  refreshing the page clears them and they do not synchronize across devices.
+
+### Fixed
+
+- Classified remote METAR/TAF replies consistently with local system messages,
+  keeping them out of the For you private-message filter.
+- Cancelling a Custom recipient no longer sends the text to UNICOM. Unavailable
+  transports retain ordinary messages and direct-message commands in the composer.
+- Hardened the server-update test harness on Windows against conflicting
+  `Path`/`PATH` entries and shell path conversion. Tests verify that Git, Docker,
+  and curl resolve to their stubs before running any deployment scenario.
+
 ## 0.1.2-beta.3 - 2026-09-11
 
 ### Added

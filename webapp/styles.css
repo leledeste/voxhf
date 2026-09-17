@@ -12,6 +12,8 @@
   --primary: #0c8578;
   --primary-strong: #08695f;
   --primary-soft: #dff3ef;
+  --addressed: #88520b;
+  --addressed-soft: #fff4e1;
   --accent: #e86857;
   --accent-soft: #fbe9e5;
   --warning: #bb7418;
@@ -39,6 +41,8 @@
   --primary: #47c8b6;
   --primary-strong: #72ddce;
   --primary-soft: #173b36;
+  --addressed: #edbc72;
+  --addressed-soft: #30291e;
   --accent: #ff8d7d;
   --accent-soft: #402723;
   --warning: #f1b45f;
@@ -293,6 +297,29 @@ select { cursor: pointer; }
 }
 
 .rx-light.active strong { color: var(--primary-strong); }
+
+.rx-light.muted small { color: var(--warning); }
+
+#rx-mute {
+  display: grid;
+  place-items: center;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+#rx-mute:hover { background: var(--surface-soft); }
+#rx-mute[aria-pressed="true"] { color: var(--danger); }
+#rx-mute[aria-pressed="true"]:hover { background: var(--danger-soft); }
+.rx-speaker-slash { display: none; }
+/* Center the speaker optically when the right-hand sound waves are hidden. */
+#rx-mute[aria-pressed="true"] .rx-speaker-body { transform: translateX(4px); }
+#rx-mute[aria-pressed="true"] .rx-speaker-waves { display: none; }
+#rx-mute[aria-pressed="true"] .rx-speaker-slash { display: block; }
 
 .update-notice {
   grid-row: 2;
@@ -698,12 +725,26 @@ select { cursor: pointer; }
   min-width: 0;
   flex: 0 1 auto;
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 5px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
 }
+
+.chat-layout-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-layout-name { min-width: 0; overflow-wrap: anywhere; }
+.chat-layout-controls { display: flex; flex: 0 0 auto; gap: 5px; }
+.chat-layout-controls button { min-width: 38px; min-height: 40px; padding: 6px 9px; }
+.chat-layout-controls button:last-child { min-width: 96px; }
 
 .tab {
   min-height: 34px;
@@ -714,6 +755,14 @@ select { cursor: pointer; }
   background: transparent;
   color: var(--muted);
   box-shadow: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tab { cursor: grab; }
+  .tab-close { cursor: pointer; }
 }
 
 .tab:hover { background: transparent; color: var(--text); }
@@ -724,6 +773,10 @@ select { cursor: pointer; }
   background: transparent;
   color: var(--primary-strong);
 }
+
+.tab.dragging { background: var(--primary-soft); color: var(--primary-strong); cursor: grabbing; }
+.tab.drag-target.drag-before { box-shadow: inset 3px 0 var(--primary); }
+.tab.drag-target.drag-after { box-shadow: inset -3px 0 var(--primary); }
 
 .tab.private-peer-tab {
   display: inline-flex;
@@ -794,6 +847,7 @@ select { cursor: pointer; }
 }
 
 .msg-head {
+  flex-wrap: wrap;
   gap: 7px;
   margin-bottom: 4px;
   color: var(--muted);
@@ -809,6 +863,17 @@ select { cursor: pointer; }
   line-height: 1.38;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+/* Amber distinguishes incoming calls from teal outgoing messages; keep the text label too. */
+.msg.addressed {
+  border-left-color: var(--addressed);
+  background: var(--addressed-soft);
+}
+
+.msg-addressed-label {
+  color: var(--addressed);
+  font-weight: 700;
 }
 
 .msg.fading { animation: message-fade-out 1s ease forwards; }
