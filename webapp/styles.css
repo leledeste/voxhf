@@ -537,6 +537,11 @@ select { cursor: pointer; }
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
+.tx-button-unavailable:disabled {
+  pointer-events: none;
+  opacity: .28;
+}
+
 .control-field,
 .xpdr-code-field {
   display: grid;

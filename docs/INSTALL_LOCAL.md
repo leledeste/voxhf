@@ -45,15 +45,24 @@ The Node version must be 24 or newer and both ffmpeg searches must list Speex.
    [releases page](https://github.com/leledeste/voxhf/releases) (choose the newest beta).
 2. Extract the complete archive to a normal user folder, for example
    `C:\Users\YourName\VoxHF`. Do not run it from inside the ZIP.
-3. Double-click `start.bat`.
+3. Double-click `start.bat` before opening or connecting Altitude.
 4. On the first launch, the script installs the exact locked runtime packages
    and creates `config.json` with the tested local defaults.
 5. Keep the VoxHF console open. It prints the local URLs and the IPv4 address
    that PilotUI must use.
-6. Start PilotUI. Set its **Simulator Address** to that printed IPv4 address,
-   then connect Altitude normally.
-7. Open [http://localhost:3000](http://localhost:3000).
-8. Confirm **Link: Online**, the correct callsign, and the flight-plan airports.
+6. Configure PilotUI for the installed Altitude version:
+   - **Altitude 1.14:** open **Settings > General** and replace the default
+     **Pilot Core address / IP** (`127.0.0.1`) with the IPv4 address printed by
+     VoxHF. Unlike 1.13, this address is configured in Settings rather than in
+     the pre-login startup screen. If PilotUI was opened before VoxHF and is
+     still disconnected, start VoxHF and then press **Connect to Pilot Core**.
+   - **Altitude 1.13:** enter the IPv4 address printed by VoxHF as the
+     **Simulator Address** in the startup screen shown before login.
+7. When connecting to IVAO, Altitude 1.14 users must select **Connector** in
+   the Server list. Altitude 1.13 users may select their normal World Server or
+   Connector. Altitude currently does not remember Connector between sessions.
+8. Open [http://localhost:3000](http://localhost:3000).
+9. Confirm **Link: Online**, the correct callsign, and the flight-plan airports.
 
 If Windows Firewall asks about Node.js, allow it only on the private network
 used by the simulator. Do not forward or publish VoxHF's local ports.
@@ -67,8 +76,8 @@ Live compatibility testing for the routing introduced in 0.1.2-beta.3 is describ
 [Voice Routing Diagnostics](VOICE_ROUTING_DIAGNOSTICS.md).
 
 `config.json` contains private settings and, in remote mode, an agent token.
-Never publish it. The `.voxhf-local` folder holds notification credentials and
-subscriptions; keep it private as well.
+Never publish it. The `.voxhf-local` folder holds notification credentials,
+subscriptions, and other private local state; keep it private as well.
 
 ## Install From Source
 
@@ -201,7 +210,7 @@ device subscriptions, so disable notifications in the app first when possible.
 | `ffmpeg was not found in PATH` | Install ffmpeg, open a new terminal, and verify the Speex encoder/decoder commands. |
 | `npm ci` fails on first launch | Check internet access and the npm error; do not copy a partial `node_modules` from another version. |
 | Browser shows `Proxy unavailable` | Keep `start.bat` running and check whether another process uses port 3000. |
-| Altitude does not connect | Re-enter the exact IPv4 printed by VoxHF as PilotUI's Simulator Address. |
+| Altitude does not connect | Start VoxHF first. With 1.14, open **Settings > General**, enter VoxHF's printed IPv4 as **Pilot Core address / IP**, and press **Connect to Pilot Core** if the UI was already open; then select **Connector** when connecting to IVAO. With 1.13, re-enter the printed IPv4 as the pre-login **Simulator Address** and use a normal World Server or Connector. |
 | Remote agent is rejected | Recheck the relay URL and rotate/re-enter the personal agent token if necessary. |
 
 For application behavior after the connection succeeds, continue with the

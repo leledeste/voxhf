@@ -55,6 +55,14 @@ repository and do not copy `node_modules` from the development PC.
 4. Record whether Node.js, ffmpeg, setup, and startup instructions are enough
    without additional knowledge.
 5. Connect Altitude and verify initial COM/XPDR state.
+   - With Altitude 1.14, set **Settings > General > Pilot Core address / IP**
+     to VoxHF's printed IPv4 instead of its default `127.0.0.1`. Also start
+     PilotUI before VoxHF once, then confirm **Connect to Pilot Core** recovers
+     the connection after VoxHF starts. Manually select **Connector** and
+     confirm the console detects the MessagePack protocol and one FSD session.
+   - Altitude 1.13 must continue to accept the printed IPv4 in its pre-login
+     Simulator Address field, work with a normal World Server, and should also
+     be smoke-tested with Connector when available.
 6. Verify COM1/COM2 tuning, station dropdowns, private and frequency messages,
    commands, route weather, RX, and TX. Confirm that UNICOM chat remains
    visible, traffic for both tuned COM frequencies is visible, and incoming

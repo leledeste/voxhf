@@ -1,5 +1,7 @@
 'use strict';
 
+const MAX_PILOT_CORE_FRAME_BYTES = 1024 * 1024;
+
 function makeFreqPacket(com, freqMhz) {
   // PilotUI/PilotCore binary packet:
   // [07 00 00 00 20 20 COM F0 F1 F2 00], frequency in kHz little-endian.
@@ -29,6 +31,212 @@ function makeCoreFrame(type, payload) {
   frame.writeUInt32LE(body.length, 8);
   body.copy(frame, 12);
   return frame;
+}
+
+function encodeMessagePack(value) {
+  if (value === null) return Buffer.from([0xc0]);
+  if (value === false) return Buffer.from([0xc2]);
+  if (value === true) return Buffer.from([0xc3]);
+
+  if (Number.isInteger(value) && value >= 0) {
+    if (value < 0x80) return Buffer.from([value]);
+    if (value <= 0xff) return Buffer.from([0xcc, value]);
+    if (value <= 0xffff) {
+      const buffer = Buffer.alloc(3);
+      buffer[0] = 0xcd;
+      buffer.writeUInt16BE(value, 1);
+      return buffer;
+    }
+    if (value <= 0xffffffff) {
+      const buffer = Buffer.alloc(5);
+      buffer[0] = 0xce;
+      buffer.writeUInt32BE(value, 1);
+      return buffer;
+    }
+  }
+
+  if (typeof value === 'string') {
+    const body = Buffer.from(value, 'utf8');
+    if (body.length < 32) return Buffer.concat([Buffer.from([0xa0 | body.length]), body]);
+    if (body.length <= 0xff) return Buffer.concat([Buffer.from([0xd9, body.length]), body]);
+    if (body.length <= 0xffff) {
+      const header = Buffer.alloc(3);
+      header[0] = 0xda;
+      header.writeUInt16BE(body.length, 1);
+      return Buffer.concat([header, body]);
+    }
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length >= 16) throw new RangeError('PilotCore MessagePack arrays are limited to 15 items');
+    return Buffer.concat([Buffer.from([0x90 | value.length]), ...value.map(encodeMessagePack)]);
+  }
+
+  throw new TypeError(`Unsupported PilotCore MessagePack value: ${typeof value}`);
+}
+
+function makeMessagePackFrame(type, payload) {
+  const body = encodeMessagePack([type, payload]);
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(body.length, 0);
+  return Buffer.concat([header, body]);
+}
+
+function makeV114FreqPacket(com, freqMhz) {
+  return makeMessagePackFrame(0x1800, [com === 2 ? 2 : 1, Math.round(Number(freqMhz) * 1000)]);
+}
+
+function makeV114SquawkPacket(code) {
+  // Altitude 1.14 sends squawk changes through the generic PilotCore event
+  // envelope. The code remains a four-character decimal string so leading
+  // zeroes are not lost (for example 0421).
+  return makeV114CoreEventFrame(0x0100, String(code).padStart(4, '0'));
+}
+
+function makeV114XpdrTogglePacket() {
+  // Altitude 1.14's PilotUI sendTransponderToggle slot emits 0x1601.
+  return makeMessagePackFrame(0x1601, []);
+}
+
+function makeV114IdentPacket() {
+  // Altitude 1.14's PilotUI sendTransponderIdent slot emits 0x1602.
+  return makeMessagePackFrame(0x1602, []);
+}
+
+function makeV114RadioVolumePacket(com, volume) {
+  // PilotUI sends VHF volume updates through the generic PilotCore event
+  // envelope as "radio|volume", with volume expressed from 0 to 100.
+  const radio = com === 2 ? 2 : 1;
+  const level = Math.round(Number(volume));
+  if (!Number.isFinite(level) || level < 0 || level > 100) {
+    throw new RangeError('PilotCore radio volume must be between 0 and 100');
+  }
+  return makeV114CoreEventFrame(0xdde6, `${radio}|${level}`);
+}
+
+function makeV114CoreEventFrame(type, payload) {
+  return makeMessagePackFrame(0x3000, [type, String(payload)]);
+}
+
+function decodeMessagePack(buffer) {
+  let offset = 0;
+
+  function requireBytes(count) {
+    if (offset + count > buffer.length) throw new RangeError('Truncated PilotCore MessagePack value');
+  }
+
+  function read() {
+    requireBytes(1);
+    const marker = buffer[offset++];
+    if (marker <= 0x7f) return marker;
+    if (marker >= 0xe0) return marker - 0x100;
+    if ((marker & 0xe0) === 0xa0) return readString(marker & 0x1f);
+    if ((marker & 0xf0) === 0x90) return readArray(marker & 0x0f);
+    if ((marker & 0xf0) === 0x80) return readMap(marker & 0x0f);
+
+    switch (marker) {
+      case 0xc0: return null;
+      case 0xc2: return false;
+      case 0xc3: return true;
+      case 0xca:
+        requireBytes(4);
+        offset += 4;
+        return buffer.readFloatBE(offset - 4);
+      case 0xcb:
+        requireBytes(8);
+        offset += 8;
+        return buffer.readDoubleBE(offset - 8);
+      case 0xcc:
+        requireBytes(1);
+        return buffer[offset++];
+      case 0xcd:
+        requireBytes(2);
+        offset += 2;
+        return buffer.readUInt16BE(offset - 2);
+      case 0xce:
+        requireBytes(4);
+        offset += 4;
+        return buffer.readUInt32BE(offset - 4);
+      case 0xd0:
+        requireBytes(1);
+        return buffer.readInt8(offset++);
+      case 0xd1:
+        requireBytes(2);
+        offset += 2;
+        return buffer.readInt16BE(offset - 2);
+      case 0xd2:
+        requireBytes(4);
+        offset += 4;
+        return buffer.readInt32BE(offset - 4);
+      case 0xd9:
+        requireBytes(1);
+        return readString(buffer[offset++]);
+      case 0xda:
+        requireBytes(2);
+        offset += 2;
+        return readString(buffer.readUInt16BE(offset - 2));
+      case 0xdc:
+        requireBytes(2);
+        offset += 2;
+        return readArray(buffer.readUInt16BE(offset - 2));
+      case 0xde:
+        requireBytes(2);
+        offset += 2;
+        return readMap(buffer.readUInt16BE(offset - 2));
+      default:
+        throw new TypeError(`Unsupported PilotCore MessagePack marker 0x${marker.toString(16)}`);
+    }
+  }
+
+  function readString(length) {
+    requireBytes(length);
+    const value = buffer.toString('utf8', offset, offset + length);
+    offset += length;
+    return value;
+  }
+
+  function readArray(length) {
+    if (length > 256) throw new RangeError('PilotCore MessagePack array is too large');
+    return Array.from({ length }, read);
+  }
+
+  function readMap(length) {
+    if (length > 256) throw new RangeError('PilotCore MessagePack map is too large');
+    const value = {};
+    for (let index = 0; index < length; index++) value[String(read())] = read();
+    return value;
+  }
+
+  const value = read();
+  if (offset !== buffer.length) throw new RangeError('Trailing bytes in PilotCore MessagePack frame');
+  return value;
+}
+
+function createMessagePackFrameReader(onMessage) {
+  let pending = Buffer.alloc(0);
+
+  return function push(data) {
+    if (!Buffer.isBuffer(data) || !data.length) return;
+    pending = pending.length ? Buffer.concat([pending, data]) : data;
+
+    while (pending.length >= 4) {
+      const bodyLength = pending.readUInt32LE(0);
+      if (bodyLength < 1 || bodyLength > MAX_PILOT_CORE_FRAME_BYTES) {
+        pending = Buffer.alloc(0);
+        return;
+      }
+      if (pending.length < bodyLength + 4) return;
+
+      const body = pending.subarray(4, bodyLength + 4);
+      pending = pending.subarray(bodyLength + 4);
+      try {
+        onMessage(decodeMessagePack(body));
+      } catch {
+        // The bridge still forwards unknown frames byte-for-byte. Observation
+        // must never make a new Altitude message version fail closed.
+      }
+    }
+  };
 }
 
 function formatComFrequency(freq) {
@@ -111,6 +319,15 @@ module.exports = {
   makeFreqPacket,
   makeSquawkPacket,
   makeCoreFrame,
+  makeMessagePackFrame,
+  makeV114FreqPacket,
+  makeV114SquawkPacket,
+  makeV114XpdrTogglePacket,
+  makeV114IdentPacket,
+  makeV114RadioVolumePacket,
+  makeV114CoreEventFrame,
+  decodeMessagePack,
+  createMessagePackFrameReader,
   formatComFrequency,
   normalizePilotComFrequency,
   loopbackSameLength,

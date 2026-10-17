@@ -23,11 +23,16 @@ function createFsdProxy(options) {
   const port = options.port || 6809;
   const logger = options.logger || console;
   const state = options.state;
+  const debugAtis = options.debugAtis === true;
+  const debugXpdr = options.debugXpdr === true;
 
   let ivaoSocket = null;
   let fsdCoreSocket = null;
   let activeSessionId = 0;
   let confirmedIvaoSessionId = 0;
+  let tracedAtisStation = '';
+  let traceAtisUntil = 0;
+  let lastXpdrTrace = '';
   const pendingWeatherRequests = new Map();
 
   const server = net.createServer((coreSocket) => {
@@ -136,6 +141,8 @@ function createFsdProxy(options) {
       state.setConnected(true);
     }
 
+    traceAtisRecord(line, direction);
+    traceXpdrRecord(line, direction);
     const msg = parseFsdLine(line, direction);
     if (!msg) return;
     msg.direction = direction;
@@ -287,7 +294,38 @@ function createFsdProxy(options) {
       reportError('Invalid ATIS callsign');
       return false;
     }
-    return writeFsdLine(`$CQ${cs}:${station}:ATIS`, reportError);
+    const ok = writeFsdLine(`$CQ${cs}:${station}:ATIS`, reportError);
+    if (ok && debugAtis) {
+      tracedAtisStation = station;
+      traceAtisUntil = Date.now() + 20_000;
+      logger.log(`[ATIS TRACE] Waiting for ${station} records.`);
+    }
+    return ok;
+  }
+
+  function traceAtisRecord(line, direction) {
+    // ATIS text is public operational information. Raw tracing is nevertheless
+    // opt-in and limited to ATIS-shaped replies for the station just requested;
+    // ordinary chat, credentials and unrelated FSD records are never logged.
+    if (!debugAtis || direction !== 'incoming' || Date.now() > traceAtisUntil) return;
+    const text = String(line || '').trim();
+    const upper = text.toUpperCase();
+    if (!upper.includes(':ATIS:') && (!tracedAtisStation || !upper.includes(tracedAtisStation))) return;
+    logger.log(`[ATIS TRACE] ${text}`);
+  }
+
+  function traceXpdrRecord(line, direction) {
+    // Only the non-sensitive transponder flag and squawk are needed to compare
+    // PilotUI and VoxHF actions. Coordinates and the rest of the position line
+    // are deliberately excluded from diagnostic output.
+    if (!debugXpdr || direction !== 'outgoing' || !String(line || '').startsWith('@')) return;
+    const parts = String(line).trim().split(':');
+    const flag = parts[0];
+    const squawk = /^[0-7]{4}$/.test(parts[2] || '') ? parts[2] : 'unknown';
+    const signature = `${flag}|${squawk}`;
+    if (signature === lastXpdrTrace) return;
+    lastXpdrTrace = signature;
+    logger.log(`[XPDR TRACE] FSD flag=${flag} squawk=${squawk}`);
   }
 
   function writeFsdLine(line, reportError = () => {}) {

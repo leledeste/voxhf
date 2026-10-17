@@ -5,6 +5,7 @@
 VoxHF is an open-source companion for IVAO Altitude. Altitude remains connected
 on the simulator PC while VoxHF adds browser-based radios, live voice,
 transponder controls, messages, route weather, notifications, and remote access.
+VoxHF supports IVAO Altitude 1.13 and 1.14.
 
 > **Status:** public beta. VoxHF is unofficial and is not affiliated with or
 > endorsed by IVAO. Use it responsibly and follow IVAO rules.
@@ -15,8 +16,9 @@ transponder controls, messages, route weather, notifications, and remote access.
 
 - COM1 and COM2 tuning, distance-sorted online stations, and permanent UNICOM
   `122.800` access.
-- Live TS2 ATC RX and browser-microphone TX on desktop and mobile devices;
-  official Voice UNICOM is not yet supported.
+- Live TS2 ATC RX and browser-microphone TX on the primary active voice channel
+  from desktop and mobile devices; dual-radio TX and official Voice UNICOM are
+  not yet supported.
 - Frequency, broadcast, and private messages with command completion.
 - For you filtering and amber callsign highlights, page-only unsent drafts,
   and browser-saved tab ordering/visibility with non-destructive close.
@@ -58,9 +60,13 @@ winget install Gyan.FFmpeg
 ```
 
 Download `voxhf-local-<version>.zip` from the latest release, extract the whole
-archive to a user folder, and double-click `start.bat`. Enter the IPv4 address
-printed by VoxHF as PilotUI's **Simulator Address**, connect Altitude, then open
-[http://localhost:3000](http://localhost:3000).
+archive to a user folder, and follow [Local Installation](docs/INSTALL_LOCAL.md).
+Start VoxHF first. With Altitude 1.14, open **Settings > General**, replace the
+default Pilot Core address (`127.0.0.1`) with VoxHF's printed IPv4 address, and
+select **Connector** as the network server. If PilotUI was already open before
+VoxHF, press **Connect to Pilot Core** after starting VoxHF. Altitude 1.13 still
+asks for the Simulator Address before login and may use either its normal World
+Server or Connector. Then open [http://localhost:3000](http://localhost:3000).
 
 The complete first-run, remote-server, update, and removal procedures are in
 [Local Installation](docs/INSTALL_LOCAL.md).

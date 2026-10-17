@@ -21,6 +21,12 @@ in [CHANGELOG.md](../CHANGELOG.md).
 
 - VoxHF depends on observed IVAO/Altitude/FSD/TS2 behavior that can change
   outside the project.
+- Altitude 1.14 requires **Connector** to be selected manually for each network
+  connection because PilotUI does not currently remember that choice.
+- Altitude 1.14 configures VoxHF's printed IPv4 under **Settings > General >
+  Pilot Core address / IP**, rather than through the pre-login Simulator
+  Address prompt used by 1.13. If PilotUI starts first, its explicit
+  **Connect to Pilot Core** action is required after VoxHF becomes available.
 - Full Altitude/IVAO integration cannot be reproduced in automated tests; voice
   and controller-addressed notification behavior still needs live validation.
 - Browser TX may sound rougher than native Altitude, and overlapping RX can
@@ -109,8 +115,8 @@ routing, or embed the operational webapp merely to simplify installation.
 - Target flow: download `VoxHF Setup.exe`, install, choose local-only operation
   or connection to a server, then run in the background without a console.
   The first-run wizard should collect the existing relay settings and show the
-  exact Simulator Address to enter in PilotUI. Local mode must remain usable
-  without an account.
+  exact address to enter as 1.13's Simulator Address or 1.14's Pilot Core
+  address. Local mode must remain usable without an account.
 - Provide tray actions for opening VoxHF in the browser, configuration,
   diagnostics, optional start-with-Windows, and explicit exit. Display agent,
   Altitude, and relay status separately. Closing a configuration window leaves
@@ -156,9 +162,10 @@ installer screens is implemented yet.
    a connection test with actionable errors. Browser-based authorization could
    replace token copy/paste later, but requires a separately designed and tested
    authentication flow; do not collect the account password in the launcher.
-4. Detect the network interface and show a copyable Simulator Address with
-   PilotUI instructions and a connection check. Allow manual interface selection
-   when detection is ambiguous. Do not silently edit Altitude configuration.
+4. Detect the network interface and show a copyable PilotUI connection address
+   with version-specific instructions and a connection check. Allow manual
+   interface selection when detection is ambiguous. Do not silently edit
+   Altitude configuration.
 
 Keep launcher settings limited to server/device connection, network selection,
 optional Windows startup, updates, and diagnostics. Browser-specific microphone,

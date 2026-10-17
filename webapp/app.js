@@ -661,8 +661,8 @@ const accountController = window.VoxHFAccount.createAccountController({
 
 // UI ids are grouped so global state changes, such as disconnect or TX
 // active, can be applied consistently.
-const CONTROL_IDS = ['send', 'com1-input', 'com2-input', 'com1-select', 'com2-select', 'tx1', 'tx2', 'unicom-timer-toggle', 'settings-test-audio', 'settings-monitor-tx', 'xpdr-code', 'xpdr-stby', 'xpdr-alt', 'xpdr-ident'];
-const TX_BUTTON_IDS = ['tx1', 'tx2'];
+const CONTROL_IDS = ['send', 'com1-input', 'com2-input', 'com1-select', 'com2-select', 'tx1', 'unicom-timer-toggle', 'settings-test-audio', 'settings-monitor-tx', 'xpdr-code', 'xpdr-stby', 'xpdr-alt', 'xpdr-ident'];
+const TX_BUTTON_IDS = ['tx1'];
 
 // Binary microphone frames are prefixed with CTX1 so the proxy can
 // distinguish PCM from JSON commands on the same WebSocket.
@@ -1430,7 +1430,7 @@ function setOverlay(mode) {
       ? (state.remoteDevices.size
         ? 'The local VoxHF agent is online, but Altitude is not connected to IVAO yet.'
         : 'The relay is online, but the local VoxHF agent is not connected. Start VoxHF on the Altitude PC.')
-      : `Proxy is active. In PilotUI, use Simulator Address: ${state.lanIp || '...'}`;
+      : `Proxy is active. PilotUI address: ${state.lanIp || '...'}. In Altitude 1.14, set it under Settings > General > Pilot Core address / IP, then click Connect to Pilot Core if needed. In Altitude 1.13, use the pre-login Simulator Address.`;
     // FSD status can briefly report disconnected during browser recovery or
     // PilotCore reconnects. If the UI was online, wait a moment before
     // showing the blocking overlay so short reconnects do not look fatal.
@@ -1464,7 +1464,7 @@ function setOffline(title, text) {
   state.connected = false;
   $('overlay-actions').classList.add('hidden');
   $('overlay-title').textContent = title;
-  $('overlay-text').innerHTML = enc(text).replace(/Simulator Address: ([^ ]+)/, 'Simulator Address: <code>$1</code>');
+  $('overlay-text').innerHTML = enc(text).replace(/PilotUI address: ([^ ]+)/, 'PilotUI address: <code>$1</code>');
   $('overlay').classList.remove('hidden');
   $('dot').classList.remove('online');
   $('status-text').textContent = 'Offline';
@@ -3359,14 +3359,14 @@ function normalizeCallsign(value) {
 }
 
 function isWeatherChat(peer) {
-  return /^(METAR|TAF)$/i.test(String(peer || ''));
+  return /^(METAR|TAF|ATIS)$/i.test(String(peer || ''));
 }
 
 function privatePeerForMessage(msg) {
   // A private message can be outgoing or incoming. The peer is whichever
   // side is not our callsign.
-  // Weather service tabs reuse the same non-destructive shortcut model, but
-  // their replies remain system messages rather than private conversations.
+  // Weather and ATIS service tabs reuse the same non-destructive shortcut
+  // model, but their replies remain system messages rather than private chats.
   if (msg && msg.direction !== 'outgoing' && isWeatherChat(msg.sender)) return String(msg.sender).toUpperCase();
   if (!msg || msg.type !== 'private') return '';
   if (msg.privatePeer) return msg.privatePeer;
@@ -3973,7 +3973,6 @@ function bindUi() {
   $('xpdr-ident').onclick = sendIdentUi;
   renderXpdrMode();
   bindHoldButton('tx1', holdSeq => startTx(1, false, holdSeq));
-  bindHoldButton('tx2', holdSeq => startTx(2, false, holdSeq));
   bindHoldButton('settings-monitor-tx', holdSeq => startTx(1, true, holdSeq));
   $('settings-test-audio').onclick = async () => {
     if (state.remote.enabled) {

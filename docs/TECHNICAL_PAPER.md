@@ -1,8 +1,8 @@
 # VoxHF Technical Paper
 
-Version: 0.1.2 Beta (`0.1.2-beta.4`)
+Version: 0.1.3 Beta (`0.1.3-beta.1`)
 Status: public beta architecture
-Date: 2026-09-17
+Date: 2026-10-18
 
 ## Abstract
 
@@ -65,23 +65,29 @@ proxy.
 flowchart TD
   PilotUI["Altitude PilotUI"] -->|"4827 simulator/core"| Agent["VoxHF local agent"]
   Agent -->|"4827 forwarded traffic"| PilotCore["Altitude PilotCore"]
-  PilotCore -->|"FSD connection redirected to 127.0.0.1:6809"| Agent
+  PilotCore -->|"1.13 FSD redirected to 127.0.0.1:6809"| Agent
+  PilotUI -->|"1.14 FSD via Connector on 127.0.0.1:6809"| Agent
   Agent -->|"6809 proxied TCP"| IVAO["Real IVAO FSD server"]
-  PilotCore -->|"TS2 voice via per-server loopback IP:8767"| Agent
+  PilotUI -->|"TS2 voice via per-server loopback IP:8767"| Agent
   Agent -->|"8767 UDP/TCP proxied voice"| TS2["Real IVAO TS2 voice server"]
   Browser["Browser webapp"] <-->|"HTTP + WebSocket on localhost:3000"| Agent
 ```
 
 The core idea is simple:
 
-1. PilotUI is configured to use the local IPv4 address printed by VoxHF as
-   its simulator address.
+1. PilotUI is configured to use the local IPv4 address printed by VoxHF. In
+   Altitude 1.13 this is the pre-login Simulator Address; in 1.14 it is the
+   **Settings > General > Pilot Core address / IP** value, whose default is
+   `127.0.0.1`.
 2. PilotUI connects to VoxHF instead of directly to PilotCore.
 3. VoxHF forwards PilotUI/PilotCore traffic so the normal Altitude flow
    remains intact.
-4. When PilotCore receives IVAO server information, VoxHF rewrites the
-   relevant endpoints so FSD and TS2 traffic pass through the local proxy.
-5. VoxHF parses only the traffic needed for the webapp and forwards the
+4. With Altitude 1.13, VoxHF rewrites the FSD endpoint carried through the
+   PilotUI/PilotCore stream. With 1.14, the user selects PilotUI's built-in
+   Connector entry so its FSD connection reaches VoxHF directly.
+5. VOICE announcements carried by that FSD stream are rewritten to the
+   per-server TS2 endpoints owned by VoxHF.
+6. VoxHF parses only the traffic needed for the webapp and forwards the
    original session to the real IVAO servers.
 
 ## 4. Main Runtime Components
@@ -94,7 +100,8 @@ prints startup guidance. The protocol-heavy work is intentionally split into
 focused modules:
 
 - `proxy/pilot-bridge.js`: PilotUI/PilotCore proxying on the simulator/core
-  port, FSD host rewrite, COM state learning, and synthetic PilotUI TX feedback.
+  port, automatic legacy/MessagePack command selection, 1.13 FSD host rewrite,
+  COM state learning, and synthetic PilotUI TX feedback.
 - `proxy/fsd-proxy.js`: FSD TCP proxying on `127.0.0.1:6809`, parsed
   chat/weather/ATIS/flight-plan events, and VOICE host rewrite.
 - `proxy/ts2-voice-router.js`: bounded, stable per-server loopback endpoints on
@@ -185,15 +192,30 @@ PilotUI normally talks to PilotCore on a simulator/core port. VoxHF listens
 on that port and forwards traffic to PilotCore. This creates an inspection
 point without replacing PilotCore.
 
-The proxy observes binary payloads for useful state, such as radio frequency
-updates and status payloads. It does not expose this raw stream to remote
+Altitude 1.13 uses the observed legacy binary frames. Altitude 1.14 uses a
+four-byte little-endian length followed by MessagePack `[type, payload]`. The
+bridge detects the protocol from the live handshake and emits matching COM,
+squawk, XPDR, IDENT, and PilotUI TX-lamp commands. Unknown frames are still
+forwarded byte-for-byte. Parsing is bounded to 1 MiB and exists only for local
+state/command compatibility; the raw stream is never exposed to remote
 browsers.
 
 ### 5.2 FSD Redirect and Proxy
 
-When PilotCore receives an IVAO FSD endpoint, VoxHF rewrites the endpoint to
-`127.0.0.1`. PilotCore then connects to VoxHF's local FSD proxy, and VoxHF
-connects onward to the real IVAO FSD server.
+With Altitude 1.13, PilotCore receives the IVAO FSD endpoint through the bridged
+control stream. When the user selects a normal World Server, VoxHF rewrites the
+endpoint to `127.0.0.1`, so PilotCore connects to the local FSD proxy. Altitude
+1.13 can also use its built-in Connector entry.
+
+Altitude 1.14 owns the FSD connection in PilotUI. The user therefore selects
+the built-in **Connector** server entry, which connects directly to VoxHF on
+`127.0.0.1:6809`. PilotUI does not currently persist that selection, so it must
+be chosen for each connection. This path requires no Windows route, IP alias,
+port-proxy rule, administrator approval, or region-specific local listener.
+Altitude 1.14 also moved the Pilot Core address from the pre-login startup flow
+to **Settings > General**. It defaults to `127.0.0.1` and must be changed to the
+IPv4 address printed by VoxHF. If PilotUI starts before VoxHF, the user can
+start VoxHF and press **Connect to Pilot Core** without restarting PilotUI.
 
 Incoming records are buffered as bytes until LF before parsing and VOICE host
 rewriting. TCP chunk boundaries must not affect the forwarded result. Unrelated

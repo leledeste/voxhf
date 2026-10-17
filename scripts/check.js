@@ -111,6 +111,7 @@ const requiredFiles = [
   'scripts/test-ts2-dns.js',
   'proxy/voice-route-trace.js',
   'scripts/test-voice-route-trace.js',
+  'scripts/test-pilot-protocol.js',
   'scripts/test-weather.js',
   'scripts/test-web-tx.js',
   'scripts/test-push-notifications.js',
@@ -722,6 +723,7 @@ check('FSD stream test syntax', () => checkNodeSyntax('scripts/test-fsd-stream.j
 check('TS2 DNS test syntax', () => checkNodeSyntax('scripts/test-ts2-dns.js'));
 check('voice routing trace syntax', () => checkNodeSyntax('proxy/voice-route-trace.js'));
 check('voice routing trace test syntax', () => checkNodeSyntax('scripts/test-voice-route-trace.js'));
+check('PilotCore protocol test syntax', () => checkNodeSyntax('scripts/test-pilot-protocol.js'));
 check('weather decoder test syntax', () => checkNodeSyntax('scripts/test-weather.js'));
 check('Web TX readiness test syntax', () => checkNodeSyntax('scripts/test-web-tx.js'));
 check('push notification test syntax', () => checkNodeSyntax('scripts/test-push-notifications.js'));
@@ -750,6 +752,7 @@ check('TS2 DNS ordering and routing', () => runNodeScript('scripts/test-ts2-dns.
 check('voice routing isolation', () => runNodeScript('scripts/test-ts2-routing.js'));
 check('voice local endpoint transports', () => runNodeScript('scripts/test-ts2-loopback.js'));
 check('voice routing trace parity and privacy', () => runNodeScript('scripts/test-voice-route-trace.js'));
+check('PilotCore 1.13 and 1.14 protocol framing', () => runNodeScript('scripts/test-pilot-protocol.js'));
 check('Web TX readiness across UDP flows', () => runNodeScript('scripts/test-web-tx.js'));
 check('local WebSocket error isolation', () => runNodeScript('scripts/test-local-web-server.js'));
 check('push notification behavior', () => runNodeScript('scripts/test-push-notifications.js'));

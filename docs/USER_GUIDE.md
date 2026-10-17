@@ -7,9 +7,16 @@ addresses from the operator of a trusted VoxHF server.
 ## Before A Flight
 
 1. Start VoxHF on the same PC as IVAO Altitude.
-2. Confirm that PilotUI uses the IPv4 address printed by VoxHF as its
-   **Simulator Address**.
-3. Connect Altitude normally and file or load the flight plan.
+2. Configure the PilotUI connection for the installed version:
+   - **Altitude 1.14:** open **Settings > General** and replace the default
+     **Pilot Core address / IP** (`127.0.0.1`) with the IPv4 address printed by
+     VoxHF. If PilotUI was opened before VoxHF, press **Connect to Pilot Core**
+     after VoxHF starts.
+   - **Altitude 1.13:** enter VoxHF's printed IPv4 as the pre-login
+     **Simulator Address**.
+3. Connect Altitude and file or load the flight plan. Altitude 1.14 users must
+   select **Connector** in the network Server list each time; Altitude 1.13 may
+   use its normal World Server or Connector.
 4. Open `http://localhost:3000` locally, or sign in to the hosted HTTPS app on
    another device.
 5. Check the top bar:
@@ -27,7 +34,7 @@ for the entire session.
 | Area | Purpose |
 | --- | --- |
 | Top bar | Proxy/IVAO state, local or remote mode, flight plan, callsign, RX activity, theme, and Settings |
-| Radios | Tune COM1/COM2, select detected stations, receive voice, and start browser TX |
+| Radios | Tune COM1/COM2, select detected stations, receive voice, and start browser TX on the primary voice channel |
 | Transponder | Set the four-digit squawk, choose STBY/ALT, and send IDENT |
 | Communications | Read and send frequency, broadcast, private, and system messages; run commands; use the three-minute timer |
 | Route weather | Request and interpret departure/destination METAR and TAF |
@@ -105,15 +112,18 @@ at the end of this guide before changing proxy audio parameters.
 
 ## Browser Transmit (Web TX)
 
-VoxHF can use a desktop, tablet, or phone microphone to transmit on COM1 or
-COM2. This also allows a phone to act as the microphone for a simulator PC.
+VoxHF can use a desktop, tablet, or phone microphone to transmit on the primary
+active voice channel through **TX COM1**. COM2 remains available for tuning and
+message filtering, but dual-radio browser TX is not currently supported. A
+phone can still act as the microphone for the simulator PC.
 
 Before the first browser TX:
 
 1. Join the intended voice channel in Altitude.
 2. Wait for **Web TX ready**. If it remains waiting, press Altitude's real PTT
    once so VoxHF can observe a valid TS2 transmit session.
-3. Select **TX COM1** or **TX COM2** and allow microphone permission.
+3. Select **TX COM1** and allow microphone permission. **TX COM2** remains
+   visibly disabled until dual-radio browser TX is supported.
 4. Hold the control while speaking; release it to stop. The button shows
    **ON AIR** during the active transmission.
 
@@ -474,7 +484,8 @@ workspace behind it.
 | Symptom | Check |
 | --- | --- |
 | `Proxy unavailable` | Start `start.bat`; confirm port 3000 is not used by another process. |
-| Altitude/FSD remains offline | Use the IPv4 printed by VoxHF as PilotUI's Simulator Address, then reconnect Altitude. |
+| Altitude/Pilot Core remains offline | Start VoxHF first. In 1.14, use **Settings > General** to set **Pilot Core address / IP** to VoxHF's printed IPv4, then press **Connect to Pilot Core**. In 1.13, set the pre-login **Simulator Address** to the printed IPv4. |
+| Altitude 1.14 connects to Pilot Core but FSD remains offline | Select **Connector** in the network Server list when connecting to IVAO; PilotUI does not currently remember this choice. |
 | iPhone/iPad shows RX but is silent | Tap the RX activation prompt; then use **Settings > Audio > Test RX**. Return the app to foreground if iOS suspended it. |
 | Desktop hears RX but mobile does not | Check the mobile prompt, system volume/output route, foreground state, and Test RX before restarting the proxy. |
 | Web TX says waiting | Join a voice channel and press Altitude's real PTT once; then allow microphone permission. |

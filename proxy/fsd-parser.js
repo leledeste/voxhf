@@ -82,6 +82,29 @@ function parseFsdLine(rawLine, direction) {
     }
   }
 
+  // Altitude 1.14 receives Datalink ATIS as an #AC header followed by one or
+  // more #AT records. The first #AT record can be the TS2 endpoint; readable
+  // records contain the actual ATIS text. Keep the voice target out of chat.
+  if (direction === 'incoming' && line.startsWith('#AT')) {
+    const parts = line.slice(3).split(':');
+    if (parts.length >= 3) {
+      const station = normalizeAtisStation(parts[0]);
+      const recipient = parts[1];
+      const text = parts.slice(2).join(':').trim();
+      if (station && text && !isAtisVoiceTarget(text)) {
+        return {
+          raw: line,
+          kind: 'message',
+          type: 'system',
+          sender: 'ATIS',
+          recipient,
+          text: `${station}: ${text}`,
+          timestamp: timestamp(),
+        };
+      }
+    }
+  }
+
   if (line.startsWith('#AP')) {
     const callsign = line.slice(3).split(':')[0];
     return { raw: line, kind: 'login', callsign, timestamp: timestamp() };
@@ -128,6 +151,32 @@ function parseFsdLine(rawLine, direction) {
         atc,
         ts2Server: slash >= 0 ? voiceTarget.slice(0, slash) : voiceTarget,
         channelName: slash >= 0 ? voiceTarget.slice(slash + 1) : atc,
+        timestamp: timestamp(),
+      };
+    }
+    // ATIS responses are a short sequence: V carries the voice-server URL,
+    // T carries one text line, and E marks the end. Some IVAO endpoints put
+    // the requested station between ATIS and the record marker, while older
+    // endpoints use it as the first $CR field. Find the marker structurally
+    // so both forms remain readable without exposing unrelated FSD records.
+    const atisIndex = parts.findIndex(part => String(part).trim().toUpperCase() === 'ATIS');
+    const markerIndex = atisIndex < 0
+      ? -1
+      : parts.findIndex((part, index) => index > atisIndex
+        && ['V', 'T', 'E'].includes(String(part).trim().toUpperCase()));
+    if (atisIndex >= 0 && markerIndex > atisIndex
+      && String(parts[markerIndex]).trim().toUpperCase() === 'T') {
+      const embeddedStation = parts.slice(atisIndex + 1, markerIndex)
+        .map(normalizeAtisStation)
+        .find(Boolean);
+      const station = embeddedStation || normalizeAtisStation(parts[0]) || 'ATIS';
+      return {
+        raw: line,
+        kind: 'message',
+        type: 'system',
+        sender: 'ATIS',
+        recipient: parts[1],
+        text: `${station}: ${parts.slice(markerIndex + 1).join(':')}`,
         timestamp: timestamp(),
       };
     }
@@ -182,6 +231,16 @@ function parseFlightPlanFields(parts) {
 function normalizeIcao(value) {
   const text = String(value || '').trim().toUpperCase();
   return /^[A-Z]{4}$/.test(text) ? text : '';
+}
+
+function normalizeAtisStation(value) {
+  const text = String(value || '').trim().toUpperCase();
+  if (text === 'SERVER') return '';
+  return /^[A-Z0-9]+_[A-Z0-9_]+$/.test(text) && text.length <= 32 ? text : '';
+}
+
+function isAtisVoiceTarget(value) {
+  return /^[A-Z0-9.-]+\/[A-Z0-9_]+$/i.test(String(value || '').trim());
 }
 
 function normalizeAtcFrequency(value) {

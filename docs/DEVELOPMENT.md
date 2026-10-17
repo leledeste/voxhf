@@ -34,6 +34,7 @@ Requirements:
 | `npm.cmd run relay:account:test` | Hosted pilot-account registration, login, recovery, sessions, and deletion. |
 | `npm.cmd run relay:admin:test` | Relay-owner administration, sessions, recovery, and optional MFA paths. |
 | `npm.cmd run fsd:test` | Confirmed disconnect policy, TCP record framing, and VOICE host rewriting. |
+| `npm.cmd run pilot:test` | Altitude 1.13 legacy commands plus captured 1.14 MessagePack framing and commands. |
 | `npm.cmd run local-web:test` | Local WebSocket error/close cleanup, stale commands/PCM, initial-send failures, healthy peers, and a real oversized frame on localhost. |
 | `npm.cmd run webtx:test` | Web TX readiness, alternating UDP flows, rapid PTT restarts, delayed encoder exits/output, monitor cleanup, and independent browser sessions. |
 | `npm.cmd run ts2:test` | DNS ordering, per-server routing, asynchronous FSD rewriting, TX/RX session ownership, and real local TCP/UDP loopback transport. No IVAO connection. |

@@ -13,6 +13,7 @@ const root = path.resolve(__dirname, '..');
 const accountModule = require(path.join(root, 'webapp', 'account.js'));
 const accountSource = fs.readFileSync(path.join(root, 'webapp', 'account.js'), 'utf8');
 const weatherSource = fs.readFileSync(path.join(root, 'webapp', 'weather.js'), 'utf8');
+const appHtmlSource = fs.readFileSync(path.join(root, 'webapp', 'app.html'), 'utf8');
 const appSource = fs.readFileSync(path.join(root, 'webapp', 'app.js'), 'utf8');
 const { notificationTrigger } = require('../proxy/push-notifications');
 
@@ -530,6 +531,13 @@ function test(name, fn) {
   tests.push({ name, fn });
 }
 
+test('COM2 remains tunable while its unsupported Web TX control stays disabled', () => {
+  assert.match(appHtmlSource, /id="tx2"[^>]*\bdisabled\b/);
+  assert.match(appHtmlSource, /id="com2-input"/);
+  assert.match(appHtmlSource, /id="com2-select"/);
+  assert.doesNotMatch(appSource, /bindHoldButton\('tx2'/);
+});
+
 test('chat history survives duplicate recovery and closing a private tab', () => {
   const { app } = createHarness();
   app.state.callsign = 'MHL212';
@@ -850,6 +858,9 @@ test('weather requests reuse METAR/TAF tabs and late replies never steal selecti
   app.addRemoteChatMessage({ sender: 'TAF', recipient: 'TEST123', direction: 'incoming', text: 'TAF LIMC 171100Z 1712/1812 00000KT CAVOK', messageId: 'taf' });
   assert.strictEqual(app.state.messages.filter(app.messageMatchesCurrentTab).length, 1);
   assert.strictEqual(app.state.messages.at(-1).type, 'system', 'remote weather must match local classification');
+  app.addRemoteChatMessage({ sender: 'ATIS', recipient: 'TEST123', direction: 'incoming', text: 'LIMC_TWR: Information A', messageId: 'atis' });
+  assert.strictEqual(app.state.messages.at(-1).type, 'system', 'remote ATIS must match local classification');
+  assert(app.state.privatePeers.has('ATIS'));
   app.setActiveChatFilter('for-you');
   assert.strictEqual(app.state.messages.filter(app.messageMatchesCurrentTab).length, 0);
 });

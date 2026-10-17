@@ -89,7 +89,7 @@
             <article class="radio">
               <div class="radio-header">
                 <div class="radio-identity"><span class="radio-name">COM2</span><span class="radio-freq" id="com2-label">---</span></div>
-                <button id="tx2" class="tx-button" type="button">TX COM2</button>
+                <button id="tx2" class="tx-button tx-button-unavailable" type="button" disabled aria-label="TX COM2 unavailable" title="Web TX currently supports the primary voice channel only">TX COM2</button>
               </div>
               <label class="control-field frequency-field">
                 <span>Frequency</span>
@@ -244,7 +244,7 @@
               <span id="settings-altitude" class="setting-value">Offline</span>
             </div>
             <div class="setting-row">
-              <span class="setting-label">Simulator Address</span>
+              <span class="setting-label">PilotUI Address</span>
               <span id="settings-address" class="setting-value">---</span>
             </div>
             <div class="setting-row">
@@ -464,6 +464,6 @@
 
   <script src="weather.js?v=20260910-1"></script>
   <script src="account.js?v=20260802-5"></script>
-  <script src="app.js?v=20260917-1"></script>
+  <script src="app.js?v=20261018-1"></script>
 </body>
 </html>

@@ -90,6 +90,8 @@ use it after expiry.
 ## Residual Risks
 
 - Observed Altitude/IVAO/TS2 behavior may change outside VoxHF's control.
+- Altitude 1.14 currently requires the user to select Connector for every
+  connection because PilotUI does not persist that choice.
 - The local agent and its host are privileged; compromise of the simulator PC
   can bypass browser/relay protections.
 - A compromised paired browser can act within that user's allowed controls

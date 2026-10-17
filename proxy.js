@@ -5,8 +5,9 @@
  *
  * General flow:
  * 1. PilotUI connects to this program on port 4827.
- * 2. This program forwards data to PilotCore, but replaces the IVAO FSD IP
- *    with 127.0.0.1 so PilotCore goes through the local FSD proxy.
+ * 2. This program forwards data to PilotCore. Altitude 1.13 can use its normal
+ *    World Server path, which is rewritten locally; Altitude 1.14 uses the
+ *    built-in Connector entry to reach the local FSD proxy directly.
  * 3. The local FSD proxy reads chat, commands, weather, and VOICE messages.
  * 4. Each announced TS2 server gets a distinct local loopback endpoint so
  *    Altitude retains server identity while traffic passes through this program.
@@ -40,8 +41,6 @@ const { createUnicomTimer } = require('./proxy/unicom-timer');
 const { WS_OPEN } = require('./proxy/socket-utils');
 const { normalizeSquawkCode } = require('./proxy/fsd-parser');
 const {
-  makeFreqPacket,
-  makeSquawkPacket,
   formatComFrequency,
   normalizePilotComFrequency,
 } = require('./proxy/pilot-core');
@@ -69,6 +68,8 @@ const IVAO_DISCONNECT_ALERT_DELAY_MS = 10_000;
 const IVAO_DISCONNECT_ALERT_RETRY_MS = 30_000;
 const IVAO_DISCONNECT_ALERT_WINDOW_MS = 30 * 60 * 1000;
 const IVAO_STARTUP_NOTIFICATION_QUIET_MS = 2_000;
+const DEFAULT_VHF1_VOLUME = 76;
+const DEFAULT_VHF2_VOLUME = 50;
 
 const LOCAL_IPS = listLocalNetworkIps();
 const LAN_IP = detectLanIp(CONFIG.lanIp, LOCAL_IPS);
@@ -110,6 +111,8 @@ const unicomTimer = createUnicomTimer({
 
 const pilotBridge = createPilotBridge({
   routeTrace,
+  tracePilotCommands: process.argv.includes('--trace-pilot-commands'),
+  tracePilotAudio: process.argv.includes('--trace-pilot-audio'),
   port: INTERNAL_PORT,
   pilotCoreHost: PILOTCORE_HOST,
   fsdPort: FSD_PORT,
@@ -136,6 +139,8 @@ const ts2Voice = createTs2VoiceRouter({
 
 const fsdProxy = createFsdProxy({
   routeTrace,
+  debugAtis: process.argv.includes('--trace-atis'),
+  debugXpdr: process.argv.includes('--trace-pilot-commands'),
   port: FSD_PORT,
   state: appState,
   logger: console,
@@ -257,6 +262,11 @@ function timestamp() {
 }
 
 function handleIvaoConnected() {
+  const vhf1Initialized = pilotBridge.setRadioVolume(1, DEFAULT_VHF1_VOLUME);
+  const vhf2Initialized = pilotBridge.setRadioVolume(2, DEFAULT_VHF2_VOLUME);
+  if (vhf1Initialized && vhf2Initialized) {
+    console.log(`[4827] VHF volumes initialized: VHF1 ${DEFAULT_VHF1_VOLUME}, VHF2 ${DEFAULT_VHF2_VOLUME}.`);
+  }
   cancelIvaoDisconnectAlert('IVAO reconnected');
   armAgentOfflineWatchdog();
   cancelIvaoConnectedAlert();
@@ -423,18 +433,12 @@ function clearWebTxReadiness(reason) {
 // Commands sent to PilotCore
 // ---------------------------------------------------------------------------
 
-function sendToPilotCore(buf) {
-  // All simulator-control commands share the PilotCore control socket learned
-  // from the 4827 proxy.
-  return pilotBridge.sendToCore(buf);
-}
-
 function setCom(com, freq, station = '') {
-  // Update PilotCore first, then optimistically update the webapp display.
-  // PilotCore will also echo real radio changes back through the 4827 bridge.
+  // The bridge chooses the legacy 1.13 packet or the authenticated 1.14+
+  // MessagePack command after observing the live PilotUI handshake.
   const value = normalizePilotComFrequency(freq);
   if (!value) return false;
-  const ok = sendToPilotCore(makeFreqPacket(com, value));
+  const ok = pilotBridge.setCom(com, value);
   if (ok) {
     console.log(`[4827] COM${com} -> ${value} MHz`);
     appState.updateComFrequency(com, value, station);
@@ -443,24 +447,22 @@ function setCom(com, freq, station = '') {
 }
 
 function setSquawk(code) {
-  // Squawk is a small binary packet; validation stays in the UI/command layer.
+  // Validation stays in the command layer; the bridge owns protocol encoding.
   const squawk = normalizeSquawkCode(code);
   if (!squawk) return false;
-  const ok = sendToPilotCore(makeSquawkPacket(squawk));
+  const ok = pilotBridge.setSquawk(squawk);
   if (ok) appState.updateXpdrState({ squawk });
   return ok;
 }
 
 function toggleXpdr(mode = '') {
-  // The Altitude protocol exposes transponder mode as a toggle packet.
-  const ok = sendToPilotCore(Buffer.from([0x03, 0, 0, 0, 0x01, 0x20, 0]));
+  const ok = pilotBridge.toggleXpdr();
   if (ok && (mode === 'stby' || mode === 'alt')) appState.updateXpdrState({ mode });
   return ok;
 }
 
 function sendIdent() {
-  // IDENT is a direct PilotCore command; no FSD line is involved.
-  return sendToPilotCore(Buffer.from([0x03, 0, 0, 0, 0x02, 0x20, 0]));
+  return pilotBridge.sendIdent();
 }
 
 function setAltitudeTxLamp(com, active) {
@@ -509,7 +511,11 @@ console.log('  VoxHF');
 console.log('=======================================================');
 console.log('  1. Start VoxHF before connecting Altitude/PilotUI');
 if (LOCAL_IPS.length > 1) console.log(`  Local IPs detected: ${LOCAL_IPS.map((candidate) => `${candidate.ip} (${candidate.name})`).join(', ')}`);
-console.log(`  2. In PilotUI -> Simulator Address: ${LAN_IP}`);
-console.log('  3. Start PilotCore/Altitude and connect normally');
-console.log(`  4. Local webapp: http://localhost:${WEB_PORT}`);
+console.log(`  2. Altitude 1.14 -> Settings > General > Pilot Core IP: ${LAN_IP}`);
+console.log('     If PilotUI started first, click "Connect to Pilot Core"');
+console.log('  3. Altitude 1.14: select Server "Connector"');
+console.log(`     Altitude 1.13 -> pre-login Simulator Address: ${LAN_IP}`);
+console.log('     Then use a normal World Server or Connector');
+console.log('  4. Connect Altitude/PilotUI');
+console.log(`  5. Local webapp: http://localhost:${WEB_PORT}`);
 console.log('=======================================================');

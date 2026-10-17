@@ -4,6 +4,15 @@ const net = require('net');
 const { writeIfOpen, destroyIfOpen } = require('./socket-utils');
 const {
   makeCoreFrame,
+  makeFreqPacket,
+  makeSquawkPacket,
+  makeV114FreqPacket,
+  makeV114SquawkPacket,
+  makeV114XpdrTogglePacket,
+  makeV114IdentPacket,
+  makeV114RadioVolumePacket,
+  makeV114CoreEventFrame,
+  createMessagePackFrameReader,
   loopbackSameLength,
   extractCoreTextPayloads,
   parseComToken,
@@ -21,6 +30,8 @@ function createPilotBridge(options) {
 
   let pilotUiSocket = null;
   let pilotCoreControlSocket = null;
+  let pilotProtocol = 'legacy';
+  let loggedMessagePackVersion = '';
 
   function learnCallsignFromText(text) {
     // PilotUI login payloads contain "CALLSIGN|VID|...". We only report the
@@ -46,6 +57,48 @@ function createPilotBridge(options) {
     // payloads that explicitly pair a COM index with a VHF frequency.
     for (const payload of extractCoreTextPayloads(data)) {
       learnComFrequencyFromText(payload);
+    }
+  }
+
+  function observeMessagePack(message, direction) {
+    if (!Array.isArray(message) || message.length !== 2 || !Number.isInteger(message[0])) return;
+    const [type, payload] = message;
+    pilotProtocol = 'messagepack';
+
+    if (options.tracePilotCommands && direction === 'ui-to-core'
+      && (type === 0x1601 || type === 0x1602)) {
+      logger.log(`[XPDR TRACE] PilotUI -> PilotCore type=0x${type.toString(16)} payload=${JSON.stringify(payload)}`);
+    }
+
+    // Altitude 1.14 transports VHF volume changes through the generic core
+    // event envelope. Trace only the validated "radio|volume" value: dumping
+    // arbitrary bridge payloads could expose credentials, chat or flight data.
+    if (options.tracePilotAudio && type === 0x3000 && Array.isArray(payload)
+      && payload[0] === 0xdde6 && typeof payload[1] === 'string') {
+      const match = payload[1].match(/^([12])\|(\d{1,3})$/);
+      if (match && Number(match[2]) <= 100) {
+        logger.log(`[AUDIO TRACE] ${direction} VHF${match[1]} volume=${Number(match[2])}`);
+      }
+    }
+
+    if (direction === 'core-to-ui' && type === 0x2000 && Array.isArray(payload)) {
+      const version = typeof payload[2] === 'string' ? payload[2] : '1.14+';
+      if (version !== loggedMessagePackVersion) {
+        loggedMessagePackVersion = version;
+        logger.log(`[4827] Altitude MessagePack protocol detected (${version}).`);
+      }
+    }
+
+    if (direction === 'ui-to-core' && type === 0x1800 && Array.isArray(payload)) {
+      const com = Number(payload[0]);
+      const khz = Number(payload[1]);
+      if ((com === 1 || com === 2) && Number.isInteger(khz) && khz >= 118000 && khz <= 137000) {
+        options.onComFrequency?.(com, khz / 1000);
+      }
+    }
+
+    if (type === 0x3000 && Array.isArray(payload) && typeof payload[1] === 'string') {
+      learnComFrequencyFromText(payload[1]);
     }
   }
 
@@ -98,7 +151,16 @@ function createPilotBridge(options) {
     // side destroys the other, which keeps Altitude from waiting on stale TCP
     // sessions after reconnects.
     pilotUiSocket = uiSocket;
+    pilotProtocol = 'legacy';
+    loggedMessagePackVersion = '';
     logger.log(`[4827] PilotUI connected from ${uiSocket.remoteAddress}`);
+
+    const readUiMessages = createMessagePackFrameReader(message => {
+      observeMessagePack(message, 'ui-to-core');
+    });
+    const readCoreMessages = createMessagePackFrameReader(message => {
+      observeMessagePack(message, 'core-to-ui');
+    });
 
     const coreSocket = net.createConnection({ host: pilotCoreHost, port }, () => {
       pilotCoreControlSocket = coreSocket;
@@ -107,12 +169,14 @@ function createPilotBridge(options) {
 
     uiSocket.on('data', (data) => {
       trace?.packet('pilot', 'out', uiSocket, data);
+      readUiMessages(data);
       learnComFrequency(data);
       writeIfOpen(coreSocket, rewriteFsdHost(data));
     });
 
     coreSocket.on('data', (data) => {
       trace?.packet('pilot', 'in', uiSocket, data);
+      readCoreMessages(data);
       learnComFrequency(data);
       writeIfOpen(uiSocket, data);
     });
@@ -138,17 +202,76 @@ function createPilotBridge(options) {
     return writeIfOpen(pilotCoreControlSocket, buf);
   }
 
+  function setCom(com, freq) {
+    const packet = pilotProtocol === 'messagepack'
+      ? makeV114FreqPacket(com, freq)
+      : makeFreqPacket(com, freq);
+    return sendToCore(packet);
+  }
+
+  function setSquawk(code) {
+    const packet = pilotProtocol === 'messagepack'
+      ? makeV114SquawkPacket(code)
+      : makeSquawkPacket(code);
+    return sendToCore(packet);
+  }
+
+  function toggleXpdr() {
+    const packet = pilotProtocol === 'messagepack'
+      ? makeV114XpdrTogglePacket()
+      : Buffer.from([0x03, 0, 0, 0, 0x01, 0x20, 0]);
+    const sent = sendToCore(packet);
+    if (options.tracePilotCommands) logger.log(`[XPDR TRACE] VoxHF -> PilotCore action=toggle sent=${sent}`);
+    return sent;
+  }
+
+  function sendIdent() {
+    const packet = pilotProtocol === 'messagepack'
+      ? makeV114IdentPacket()
+      : Buffer.from([0x03, 0, 0, 0, 0x02, 0x20, 0]);
+    const sent = sendToCore(packet);
+    if (options.tracePilotCommands) logger.log(`[XPDR TRACE] VoxHF -> PilotCore action=ident sent=${sent}`);
+    return sent;
+  }
+
+  function setRadioVolume(com, volume) {
+    // The Connector path is currently observed only on the MessagePack-based
+    // Altitude 1.14 bridge. Update PilotCore and mirror the event to PilotUI so
+    // its slider reflects the same value. This is a one-shot initialization;
+    // later user adjustments remain untouched.
+    if (pilotProtocol !== 'messagepack') return false;
+    let packet;
+    try {
+      packet = makeV114RadioVolumePacket(com, volume);
+    } catch {
+      return false;
+    }
+    const sent = sendToCore(packet);
+    if (sent) writeIfOpen(pilotUiSocket, packet);
+    return sent;
+  }
+
   function setTxLamp(com, active) {
     // Web TX sends audio directly through TS2, so PilotUI needs synthetic
     // feedback to light its TX indicator just like a real PTT press.
     const radio = com === 2 ? 2 : 1;
-    return writeIfOpen(pilotUiSocket, makeCoreFrame(0xdde53000, `${radio}|${active ? 1 : 0}|0|0`));
+    const payload = `${radio}|${active ? 1 : 0}|0|0`;
+    const packet = pilotProtocol === 'messagepack'
+      ? makeV114CoreEventFrame(0xdde5, payload)
+      : makeCoreFrame(0xdde53000, payload);
+    return writeIfOpen(pilotUiSocket, packet);
   }
 
   return {
     server,
     sendToCore,
+    setCom,
+    setSquawk,
+    toggleXpdr,
+    sendIdent,
+    setRadioVolume,
     setTxLamp,
+    getProtocol: () => pilotProtocol,
   };
 }
 

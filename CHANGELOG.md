@@ -4,6 +4,37 @@ All notable VoxHF changes are recorded here.
 
 ## Unreleased
 
+## 0.1.3-beta.1 - 2026-10-18
+
+### Added
+
+- Added Altitude 1.14 MessagePack compatibility for COM tuning, squawk changes,
+  STBY/ALT, IDENT, TX-lamp feedback, radio state, and reconnect handling while
+  preserving the existing Altitude 1.13 protocol path.
+- Added bounded PilotCore protocol regression coverage and opt-in diagnostics
+  for Pilot commands, radio volume events, XPDR state, and requested ATIS
+  records without logging unrelated bridge or FSD payloads.
+
+### Changed
+
+- Altitude 1.14 now uses its built-in **Connector** server entry and configures
+  VoxHF's printed address under **Settings > General > Pilot Core address / IP**.
+  Altitude 1.13 retains its pre-login Simulator Address and normal World Server
+  workflow. Startup, installation, website, and troubleshooting guidance now
+  explain both supported versions.
+- Initialize Altitude 1.14 VHF1 and VHF2 volumes to 76 and 50 after a confirmed
+  IVAO connection, mirroring the values in PilotUI while leaving later manual
+  adjustments untouched. Altitude 1.13 is unaffected.
+- Kept COM2 tuning and message filtering available but visibly disabled its
+  unsupported browser TX control. Web TX remains available on the primary
+  active voice channel through TX COM1.
+
+### Fixed
+
+- Forwarded Altitude 1.14 Datalink ATIS text to the webapp, excluding its voice
+  endpoint record, and accepted both current and legacy IVAO ATIS reply layouts.
+  ATIS replies now reuse a non-destructive service tab like METAR and TAF.
+
 ## 0.1.2-beta.4 - 2026-09-17
 
 ### Added

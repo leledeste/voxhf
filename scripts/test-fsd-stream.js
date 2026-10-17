@@ -187,4 +187,74 @@ for (const [kind, type, raw] of [
   assert.deepEqual(core.bytes(), reply, 'weather text forwarded to PilotCore must stay unchanged');
 }
 
-console.log('[OK] FSD stream framing, voice rewriting, byte preservation, bounded tails and corrected panel weather');
+// ATIS text is returned one T record at a time. Voice metadata and the final
+// line count still pass through to Altitude, but only readable text reaches
+// VoxHF chat. Colons inside a line must remain intact.
+{
+  const h = harness();
+  const { core, remote } = h.connect();
+  const records = Buffer.from(
+    '$CRLIMC_TWR:TEST123:ATIS:V:voice.example/LIMC_TWR\r\n'
+    + '$CRLIMC_TWR:TEST123:ATIS:T:Information A: runway 35L in use\r\n'
+    + '$CRLIMC_TWR:TEST123:ATIS:E:3\r\n',
+  );
+  remote.emit('data', records);
+  assert.deepEqual(core.bytes(), records, 'ATIS records forwarded to PilotCore must stay unchanged');
+  assert.deepEqual(h.events, [{
+    kind: 'message',
+    type: 'system',
+    sender: 'ATIS',
+    recipient: 'TEST123',
+    text: 'LIMC_TWR: Information A: runway 35L in use',
+    timestamp: h.events[0].timestamp,
+    direction: 'incoming',
+  }]);
+}
+
+// Newer IVAO replies can identify SERVER as the responder and carry the
+// requested station immediately before the ATIS record marker.
+{
+  const h = harness();
+  const { core, remote } = h.connect();
+  const records = Buffer.from(
+    '$CRSERVER:TEST123:ATIS:LFLL_GND:V:voice.example/LFLL_GND\r\n'
+    + '$CRSERVER:TEST123:ATIS:LFLL_GND:T:Saint Ex Information CHARLIE: runway 17R\r\n'
+    + '$CRSERVER:TEST123:ATIS:LFLL_GND:E:3\r\n',
+  );
+  remote.emit('data', records);
+  assert.deepEqual(core.bytes(), records, 'server-routed ATIS records must stay unchanged');
+  assert.deepEqual(h.events, [{
+    kind: 'message',
+    type: 'system',
+    sender: 'ATIS',
+    recipient: 'TEST123',
+    text: 'LFLL_GND: Saint Ex Information CHARLIE: runway 17R',
+    timestamp: h.events[0].timestamp,
+    direction: 'incoming',
+  }]);
+}
+
+// Altitude 1.14 Datalink ATIS uses #AC/#AT records. The voice endpoint is
+// forwarded unchanged but omitted from chat; the readable line is published.
+{
+  const h = harness();
+  const { core, remote } = h.connect();
+  const records = Buffer.from(
+    '#ACLFLL_TWR:TEST123\r\n'
+    + '#ATLFLL_TWR:TEST123:ts-1.eu-west-2.ivao.aero/LFLL_TWR\r\n'
+    + '#ATLFLL_TWR:TEST123:Saint Ex Information DELTA recorded at 1142z LFLL 171130Z 35017KT 9999 BKN013 13/10 Q1021\r\n',
+  );
+  remote.emit('data', records);
+  assert.deepEqual(core.bytes(), records, 'Altitude 1.14 ATIS records must stay unchanged');
+  assert.deepEqual(h.events, [{
+    kind: 'message',
+    type: 'system',
+    sender: 'ATIS',
+    recipient: 'TEST123',
+    text: 'LFLL_TWR: Saint Ex Information DELTA recorded at 1142z LFLL 171130Z 35017KT 9999 BKN013 13/10 Q1021',
+    timestamp: h.events[0].timestamp,
+    direction: 'incoming',
+  }]);
+}
+
+console.log('[OK] FSD stream framing, voice rewriting, ATIS text, byte preservation, bounded tails and corrected panel weather');
